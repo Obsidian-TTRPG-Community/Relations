@@ -1,152 +1,251 @@
-# PF2e Kingmaker — Kingdom Manager
+<div align="center">
 
-> An Obsidian plugin for running **Pathfinder 2e Kingmaker** — a complete digital kingdom-management tracker that lives inside your campaign vault.
+# Relations
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Obsidian](https://img.shields.io/badge/Obsidian-1.0.0%2B-7c3aed)](https://obsidian.md)
-[![Pathfinder](https://img.shields.io/badge/Pathfinder-2e%20Kingmaker-c8102e)](https://store.paizo.com/pathfinder/pathfinder-second-edition/adventure-paths/kingmaker/)
+**See how your notes connect.**
 
-Replaces the paper Kingdom Management Tracker with six interconnected Obsidian codeblocks: a hex map, settlement urban grids, the kingdom sheet, the per-turn activity workflow, an army roster, and the event resolution log. Everything updates live, rolls itself, and persists in your vault.
+Visualise relationships between notes — for **worldbuilding**, **fiction**, **TTRPG campaigns**, **genealogies**, or any project where seeing how things connect matters. Note-driven via frontmatter, with portraits, typed line styles, family-tree layout, and embeddable graphs that work inside callouts and infoboxes.
 
-> **Companion tool, not a replacement for the rulebook.** This plugin scaffolds the bookkeeping. For the actual rules, please [buy the Kingmaker Adventure Path](https://store.paizo.com/pathfinder/pathfinder-second-edition/adventure-paths/kingmaker/) — and the [free Kingmaker Player's Guide PDF](https://paizo.com/products/btpy8dqh) is the canonical source for the kingdom-building rules the plugin paraphrases.
+![Relations graph preview](docs/preview-graph.png)
 
----
+[Install](#install) · [Quick start](#quick-start) · [Embedding](#embedding-a-graph-in-a-note) · [Family-tree mode](#family-tree-mode) · [Settings](#relationship-types)
 
-## Highlights
-
-- **🗺️ Hex map** — Click to claim hexes, set terrain, drop worksites, build roads. Auto-derives kingdom size and Control DC.
-- **🏰 Settlement urban grid** — A 3×3 block layout (36 lots) per settlement. Click a lot, pick from 47 buildings, watch stats update live.
-- **📜 Kingdom sheet** — Identity, abilities, ruin tracks, leadership (all 11 roles), kingdom feats, cross-settlement roll-up. Click any field to edit.
-- **⚔️ Per-turn workflow** — Phase pills walk you through Upkeep → Commerce → Leadership → Activity → Event. Rolls dice, classifies success, applies outcomes.
-- **🛡️ Army roster** — Editable stat blocks with picker dropdowns for ~45 tactics and ~18 war-gear options. Recruit Army auto-creates units.
-- **⚡ Event engine** — 20 catalogued events. Continuous events tick each Upkeep; critical failures worsen them.
-- **✨ Level-up wizard** — Banner appears when XP hits 1000. Walk through ability boosts, skill increases, and a feat from the ~50-entry catalogue.
-- **🎲 Half-auto rolling** — Engine rolls and classifies; you confirm, override, or add GM notes before applying. No fighting the tool.
+</div>
 
 ---
 
-## Installation
+## Why
 
-### Via BRAT (recommended for now)
+Obsidian's built-in graph shows every link in your vault, all at once, undifferentiated. **Relations** shows just the connections you care about — the ones you've explicitly named — and shows them with meaning: who's allied with whom, who's married, who's a rival, who descended from whom.
 
-The plugin is in beta and not yet listed in the official Obsidian Community Plugins. To install:
+Useful for:
 
-1. Install the [BRAT plugin](https://github.com/TfTHacker/obsidian42-brat) in Obsidian
-2. Open the Command Palette and run **BRAT: Add a beta plugin for testing**
-3. Paste the repo URL: `https://github.com/Obsidian-TTRPG-Community/PF2e-Kingmaker-KingdomManager`
-4. BRAT will install the plugin and keep it updated automatically
+- **Worldbuilding** — factions, organisations, cities, gods, dynasties
+- **Fiction writing** — story casts, dramatis personae, conflict webs
+- **TTRPG campaigns** — NPC networks, allegiances, rivalries, family lines
+- **Historical research** — genealogies, political networks, succession charts
+- Anything else where you've got a cast of linked notes and want to *see* it
+
+## Install
+
+### Via BRAT (recommended)
+
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) is the standard way to install community plugins that aren't (yet) in Obsidian's official catalogue. It also handles updates automatically.
+
+1. Install the **Obsidian42 - BRAT** plugin from Settings → Community plugins → Browse.
+2. Open BRAT's settings and click **Add Beta plugin**.
+3. Paste this repository URL: `https://github.com/Obsidian-TTRPG-Community/Relations`
+4. Click **Add Plugin**. BRAT downloads it and installs.
+5. Settings → Community plugins → enable **Relations**.
+
+BRAT will notify you of updates and apply them when you click through.
 
 ### Manual install
 
-1. Download `manifest.json`, `main.js`, and `styles.css` from the [latest release](https://github.com/Obsidian-TTRPG-Community/PF2e-Kingmaker-KingdomManager/releases/latest)
-2. Create the folder `<vault>/.obsidian/plugins/kingdom-manager/` and drop the three files into it
-3. Reload Obsidian (Ctrl/Cmd+R) and enable **PF2e Kingmaker - Kingdom Manager** in **Settings → Community plugins**
+1. Download `main.js`, `manifest.json`, and `styles.css` from the latest [release](https://github.com/Obsidian-TTRPG-Community/Relations/releases).
+2. Drop them into `<your-vault>/.obsidian/plugins/relations/` (create the folder if it doesn't exist).
+3. In Obsidian, Settings → Community plugins → enable **Relations**.
 
+## Quick start
+
+Add a portrait and some relationships to any note's frontmatter:
+
+```yaml
+---
+npcimage: "[[merlin-portrait.png]]"
+ally:
+  - "[[Arthur]]"
+spouse: "[[Nimue]]"
+mentor:
+  - "[[Arthur]]"
+family:
+  - "[[Morgana]]"
 ---
 
-## Getting started
+# Merlin
 
-1. Open any note where you want to track a kingdom
-2. Open the Command Palette (Ctrl/Cmd+P) and run **Set up new kingdom (insert blocks at cursor)**
-3. Fill in the wizard — only the kingdom name is required
-4. Click **Create kingdom and insert blocks**
-
-The plugin pre-creates the kingdom record and inserts six codeblocks at your cursor: hex map, capital settlement, kingdom sheet, kingdom turn, army roster, kingdom events. Everything is editable in-place from there.
-
-> **Tip:** rename your note to match the kingdom's name (e.g. "Brevoy Reborn") so Obsidian wiki-links from session notes and NPC pages just work.
-
----
-
-## Codeblock reference
-
-| Codeblock | Purpose |
-|---|---|
-| `kingdom-hex` | Territory map with terrain, worksites, and roads |
-| `kingdom-settlement` | Urban-grid editor for a single settlement |
-| `kingdom-sheet` | Identity, abilities, ruin, leadership, feats, roll-up |
-| `kingdom-turn` | Per-turn activity workflow with half-auto rolling |
-| `kingdom-armies` | Editable army stat blocks with tactics and gear |
-| `kingdom-events` | Active and historical events; resolution and ticking |
-
-Every codeblock takes a `kingdom: <name>` field that links it to a kingdom record. The settlement codeblock additionally takes `id` and `name`. Example:
-
-````markdown
-```kingdom-sheet
-kingdom: Brevoy Reborn
+The court magician of Camelot…
 ```
 
-```kingdom-settlement
-id: new-stetven
-name: New Stetven
-kingdom: Brevoy Reborn
+Open the graph from the **users** ribbon icon in the left sidebar, or run **Open Relations graph** from the command palette. Click any node to open that note. Right-click for *open in tab* / *open in pane*.
+
+The view has a **Full** / **Active note** toggle:
+
+- **Full** — every connected note in the vault.
+- **Active note** — the currently open note plus everyone within N hops (configurable, 1–6).
+
+## Embedding a graph in a note
+
+Use a fenced code block with the `relations` language tag anywhere in a note:
+
+````markdown
+```relations
+size: small
+depth: 1
 ```
 ````
 
----
+> [!NOTE]
+> ` ```npc-graph ` works too as a legacy alias if you have older notes from before the rename.
 
-## Commands
+### Inside callouts and infoboxes
 
-| Command | What it does |
-|---|---|
-| **Set up new kingdom (insert blocks at cursor)** | Main onboarding wizard |
-| **Level up kingdom (open wizard)** | Opens the level-up wizard if any kingdom has ≥1000 XP |
-| **Insert kingdom sheet codeblock** | Inserts a single `kingdom-sheet` block |
-| **Insert kingdom turn codeblock** | Inserts a single `kingdom-turn` block |
-| **Insert kingdom hex map codeblock** | Inserts a single `kingdom-hex` block |
-| **Insert kingdom armies codeblock** | Inserts a single `kingdom-armies` block |
-| **Insert kingdom events codeblock** | Inserts a single `kingdom-events` block |
-| **Insert settlement codeblock** | Inserts a single `kingdom-settlement` block |
-| **Reload building images from plugin folder** | Re-scan `building_images/` for PNG overrides |
-| **Reset ALL settlement & kingdom data (irreversible)** | Wipes every record stored by the plugin |
+This is the killer feature for character sheets. Drop a `relations` block inside any callout — `[!info]`, `[!note]`, the popular **ITS Theme** infobox, the **Fancy a Story** fas-infobox, anything — and it auto-renders in compact "mini" mode: smaller portraits, no border, transparent background, tightly packed.
 
----
+![Inside an ITS infobox](docs/preview-infobox.png)
 
-## Design philosophy
+````markdown
+> [!infobox|right]
+> # Merlin
+> ![[merlin.png|cover hsmall]]
+> ###### Relationships
+> ```relations
+> ```
+````
 
-**Half-auto.** The engine rolls dice, classifies success tiers, and tracks kingdom state, but every applied effect goes through a confirm / override / GM-notes step. The plugin does the bookkeeping; you make the table-side calls.
+The empty block uses sensible defaults — direct neighbours of the host note, mini size, depth 1. You can override with explicit `size: small` or `size: large` if you want the bigger format inside a callout.
 
-This shows up everywhere:
+### All code-block options
 
-- Activity rolls show a result tier with an **Override** dropdown and a **GM notes** field
-- Event resolution lets you reroll, override the outcome, or add adjudication notes
-- Each army has a **House rules / overrides** free-text field
-- Each event instance has a **Notes** field
-- Continuous-event ticking is button-driven (not automatic each phase change)
-- Level-up choices have a final **Review** step before any state mutates
+| Option        | Default                | Notes                                                                          |
+|---------------|------------------------|--------------------------------------------------------------------------------|
+| `size`        | `small`                | `mini` (~160px tall, infobox-friendly), `small` (~320px), `large` (~600px)    |
+| `depth`       | size-dependent         | hops from the focus note. `mini` is forced to 1; `small` defaults to 1; `large` defaults to 3 |
+| `scope`       | `local`                | `local` (this note + N hops) or `full` (entire vault)                          |
+| `tree`        | `false`                | force generic top-down dagre layout                                            |
+| `family-tree` | `false`                | proper family-tree layout — see below                                           |
+| `zoom`        | `1.0`, `1.4` for mini  | zoom multiplier applied after fit. `1.5` or `"150%"` zooms in 50%             |
+| `height`      | size default           | override the embed's height. Accepts `px`, `em`, `rem`, `vh`, `vw`, or `%`     |
+| `center`      | host note              | wikilink or path of a different note to focus on, e.g. `"[[King Arthur]]"`     |
 
-**Catalogues, not engines.** The plugin includes catalogues for buildings (~47), activities (~30), events (~20), army tactics (~45), war gear (~18), and kingdom feats (~50). All catalogue data is best-effort modelled from the AP appendices. Feat mechanical effects, building bonuses, and tactic edge cases are surfaced as rules-text references for GM-driven application — they don't auto-fire. This keeps the plugin tractable and respects the way Kingmaker actually plays at the table.
+## Family-tree mode
 
----
+A dedicated layout for genealogy-heavy graphs. Bloodline edges build generations, spouses pair side-by-side, and children sit under their parents' midpoint.
 
-## Building art pack
+Triggered by `family-tree: true` in any code block, or the **Family tree** toggle button in the side-panel toolbar.
 
-The plugin ships with simple abstract building tokens. For the published Kingmaker AP token art, a separate `kingdom-manager-art-pack.zip` is available. Extract the PNGs into `<plugin folder>/building_images/` and run **Reload building images from plugin folder** (or restart Obsidian).
+```yaml
+# Aegon's note
+parent:
+  - "[[Uther]]"
+  - "[[Igraine]]"
+spouse:
+  - "[[Rhaenys]]"
+```
 
-The art pack is for **personal use only** — Paizo retains copyright on the published images, so it's not bundled into the main release.
+````markdown
+```relations
+size: large
+family-tree: true
+```
+````
 
----
+<details>
+<summary><b>How the layout actually works</b> (click to expand)</summary>
 
-## Legal & acknowledgements
+1. **Bloodline edges build generations.** Any relationship type with **Gen** checked in settings counts as a bloodline. By default only `parent` is gen-flagged. The plugin runs a top-down dagre layout using *only* these edges, so generations stack horizontally.
+2. **Spouses pair side-by-side.** Any relationship with **Pair** checked (default: `spouse`) pulls partners onto the same horizontal line.
+3. **Children sit under the midpoint** of their parents' positions. Siblings are then spread evenly across the available space.
 
-**Plugin code: MIT License.** The plugin's code is released under the MIT License (see [LICENSE](LICENSE)). You're free to fork, modify, and redistribute the code; please retain attribution.
+A few honest limitations:
+- **Sibling order isn't deterministic.** Without explicit metadata the layout picks an order that minimises edge crossings, not birth order.
+- **Multiple marriages get awkward.** A person with two distinct spouses will have one placed adjacent and the other floating somewhere reachable. Real genealogy tools draw the person twice; we don't.
+- **It's a force-directed library doing tree work.** Visually it lands closer to a UML diagram than a sketched parchment chart — structurally correct, aesthetically simpler.
 
-**Paizo Community Use.** This plugin uses trademarks and/or copyrights owned by Paizo Inc., used under [Paizo's Community Use Policy](https://paizo.com/communityuse). We are expressly prohibited from charging you to use or access this content. This plugin is not published, endorsed, or specifically approved by Paizo. For more information about Paizo Inc. and Paizo products, please visit [paizo.com](https://paizo.com).
+</details>
 
-The MIT License above applies to the plugin's code. Trademarked names, descriptions, and rules text from the Pathfinder 2e Kingmaker Adventure Path referenced by the plugin's catalogues remain the property of Paizo Inc.
+## Relationship types
 
-**Building art pack (separate).** The separately-distributed building art pack contains derivative imagery of Paizo's published Kingmaker token art and is for personal use only. It is **NOT** covered by the MIT License above and ships separately from the main plugin release for that reason.
+Configure types in **Settings → Relations**. Each type has a name (= frontmatter property name), a color, and a set of behaviour flags:
 
----
+| Flag         | Effect                                                                                                                  |
+|--------------|-------------------------------------------------------------------------------------------------------------------------|
+| **Sym**      | Symmetric — declaring on either note creates the relationship both ways. Off = one-way (drawn with an arrow).           |
+| **Pair**     | Pulls paired nodes very close, with a heavy connector. Use for `spouse`, `partner`, `bonded`.                            |
+| **Tree**     | When this type dominates a graph (≥60% of edges), auto-switches to top-down layout.                                       |
+| **Gen**      | Genealogy — counts as a bloodline edge in family-tree mode. Typically `parent`.                                          |
+| **Line**     | `solid`, `dashed`, `dotted`, or `double`. Useful for marking "secret", "former", "rumored" relationships.               |
 
-## Support Paizo
+Defaults shipped:
 
-If you're going to run Kingmaker, please support Paizo:
+| Name    | Sym | Pair | Tree | Gen | Line    |
+|---------|:---:|:----:|:----:|:---:|---------|
+| ally    | ✓   |      |      |     | solid   |
+| enemy   | ✓   |      |      |     | solid   |
+| family  | ✓   |      | ✓    |     | solid   |
+| friend  | ✓   |      |      |     | solid   |
+| rival   | ✓   |      |      |     | dashed  |
+| spouse  | ✓   | ✓    |      |     | double  |
+| lover   | ✓   |      |      |     | dashed  |
+| mentor  |     |      |      |     | dotted  |
+| parent  |     |      | ✓    | ✓   | solid   |
 
-- **[Pathfinder Kingmaker Adventure Path](https://store.paizo.com/pathfinder/pathfinder-second-edition/adventure-paths/kingmaker/)** — the full 640-page hardcover including kingdom rules, warfare rules, and the AP itself
-- **[Kingmaker Player's Guide (free PDF)](https://paizo.com/products/btpy8dqh)** — spoiler-safe, contains the kingdom-building and warfare rules
+Rename, recolour, add, or delete freely — they're just defaults.
 
----
+## Portraits
 
-## Changelog
+The portrait property name is configurable in settings (default: `npcimage`). Accepted forms:
 
-See [CHANGELOG.md](CHANGELOG.md) for version history.
+```yaml
+npcimage: "[[merlin.png]]"                     # vault wikilink (recommended)
+npcimage: "Assets/Portraits/merlin.png"        # vault path
+npcimage: "https://example.com/merlin.png"     # external URL
+```
+
+The plugin uses Obsidian's resource path resolution, so vault images load even if your vault isn't web-served.
+
+<details>
+<summary><b>Frontmatter formats accepted</b> for relationship properties (click to expand)</summary>
+
+```yaml
+ally: "[[Bob]]"                     # single
+ally: ["[[Bob]]", "[[Alice]]"]      # YAML inline list
+ally:                               # YAML block list
+  - "[[Bob]]"
+  - "[[Alice]]"
+ally: "[[Bob]], [[Alice]]"          # comma-separated
+```
+
+Aliases (`[[Bob|Bobby]]`) and headings (`[[Bob#background]]`) are normalised to the file link.
+
+</details>
+
+<details>
+<summary><b>Including notes in the graph</b> — folder and tag scoping (click to expand)</summary>
+
+By default, any note with at least one configured relationship property qualifies. Notes pointed at by another note's relationship are pulled in too.
+
+For stricter scoping, set **Folder scope** or **Required tags** in settings:
+- **Folder scope** — only scan notes under specific folders, e.g. `World/People, World/Factions`.
+- **Required tags** — only include notes with one of these tags, e.g. `character, organisation`.
+
+Useful if your vault has lots of incidental wikilinks you don't want polluting the graph.
+
+</details>
+
+## Building from source
+
+```bash
+git clone https://github.com/Obsidian-TTRPG-Community/Relations.git
+cd Relations
+npm install
+npm run build
+```
+
+Then copy `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugins/relations/` and enable the plugin.
+
+## Roadmap
+
+- Filter chips by relationship type / tag inside the graph
+- Edit relationships directly from the graph (right-click → add ally)
+- Per-relationship metadata (notes, strength) via richer frontmatter
+- Group/cluster by faction tag
+- Export graph as PNG/SVG
+
+## Acknowledgements
+
+Built on [Cytoscape.js](https://js.cytoscape.org/) for graph rendering, with [fcose](https://github.com/iVis-at-Bilkent/cytoscape.js-fcose) for force-directed layouts and [dagre](https://github.com/cytoscape/cytoscape.js-dagre) for top-down trees.
+
+## License
+
+[MIT](./LICENSE).
