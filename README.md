@@ -36,7 +36,8 @@ Useful for:
 ### Via Community.Obsidian.md (recommended)
 
 Browse to: https://community.obsidian.md/plugins/relations
-Install the plugion
+
+Install the plugin
 
 ### Via BRAT (recommended)
 
