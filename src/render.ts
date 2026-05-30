@@ -4,6 +4,7 @@ import fcose from "cytoscape-fcose";
 import dagre from "cytoscape-dagre";
 import { RelationsGraph, RelationsSettings, GraphEdge } from "./types";
 import { applyGenerationLayout } from "./family-tree";
+import { drawFamilyConnectors } from "./family-connectors";
 
 type Stylesheet = cytoscape.StylesheetStyle;
 
@@ -305,6 +306,10 @@ export function renderGraph(opts: RenderOptions): Core {
 	} else if (familyGraph) {
 		const spacing = opts.spacing ?? (compact ? 0.55 : 1);
 		applyGenerationLayout(cy, graph, { spacing });
+	}
+
+	if (familyGraph) {
+		drawFamilyConnectors(cy, graph, container, !!compact);
 	}
 
 	// Apply per-node image styles after init. We do this here (not in the stylesheet
