@@ -249,7 +249,8 @@ export function renderGraph(opts: RenderOptions): Core {
 	//   arrowed for genealogy).
 	//
 	// Otherwise: standard pickLayout.
-	const initialLayout = familyGraph
+	const hasPresets = !!opts.presetPositions && Object.keys(opts.presetPositions).length > 0;
+	const initialLayout = (familyGraph || hasPresets)
 		? ({ name: "preset" } as cytoscape.LayoutOptions)
 		: pickLayout(settings, useTreeLayout, effectiveGraph, !!compact, labelWidths);
 
@@ -274,8 +275,8 @@ export function renderGraph(opts: RenderOptions): Core {
 		autolock: false,
 	});
 
-	if (opts.presetPositions) {
-		const preset = opts.presetPositions;
+	if (hasPresets) {
+		const preset = opts.presetPositions!;
 		const missing: string[] = [];
 		cy.nodes().forEach((node) => {
 			const saved = preset[node.id()];
@@ -449,7 +450,7 @@ function toCytoscape(graph: RelationsGraph, highlightId?: string): ElementDefini
 	for (const e of graph.edges) {
 		const classes: string[] = [];
 		if (e.pair) classes.push("pair");
-		// Apply a class for any non-solid line style. Solid is the default.
+		if (e.genealogy) classes.push("genealogy");
 		if (e.lineStyle && e.lineStyle !== "solid") {
 			classes.push(`ls-${e.lineStyle}`);
 		}

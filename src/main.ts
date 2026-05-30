@@ -4,7 +4,7 @@ import {
 	DEFAULT_SETTINGS,
 	VIEW_TYPE_RELATIONS,
 	RELATIONS_CODE_BLOCKS,
-	LayoutStore,
+	PositionStore,
 	LockedLayout,
 } from "./types";
 import { RelationsView } from "./view";
@@ -12,7 +12,7 @@ import { RelationsSettingTab } from "./settings";
 import { processRelationsBlock } from "./codeblock";
 import { GraphCache } from "./graph-cache";
 
-export default class RelationsPlugin extends Plugin implements LayoutStore {
+export default class RelationsPlugin extends Plugin implements PositionStore {
 	settings!: RelationsSettings;
 	graphCache: GraphCache = new GraphCache();
 	private lockedLayouts: Record<string, LockedLayout> = {};
@@ -150,17 +150,17 @@ export default class RelationsPlugin extends Plugin implements LayoutStore {
 		await this.saveData({ ...this.settings, lockedLayouts: this.lockedLayouts });
 	}
 
-	get(id: string): LockedLayout | null {
-		return this.lockedLayouts[id] ?? null;
+	get(blockId: string): LockedLayout | null {
+		return this.lockedLayouts[blockId] ?? null;
 	}
 
-	async set(id: string, data: LockedLayout): Promise<void> {
-		this.lockedLayouts[id] = data;
+	async set(blockId: string, layout: LockedLayout): Promise<void> {
+		this.lockedLayouts[blockId] = layout;
 		await this.persist();
 	}
 
-	async clear(id: string): Promise<void> {
-		delete this.lockedLayouts[id];
+	async clear(blockId: string): Promise<void> {
+		delete this.lockedLayouts[blockId];
 		await this.persist();
 	}
 

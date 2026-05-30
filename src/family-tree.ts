@@ -452,8 +452,6 @@ export function applyGenerationLayout(
 		}
 	}
 
-	// Fit the viewport to the freshly-laid-out nodes.
-	cy.fit(undefined, 50);
 }
 
 

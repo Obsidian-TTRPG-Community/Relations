@@ -158,6 +158,8 @@ export class RelationsSettingTab extends PluginSettingTab {
 			"family-graph: false # focused family view: parents above, partners on the same row, children below\n" +
 			"zoom: 1.0           # zoom multiplier applied after fit. mini defaults to 1.4. 1.5 = 150%, etc.\n" +
 			"height: 800px       # override the size's default height. Accepts px, em, rem, vh, vw, %.\n" +
+			"spacing: 1.0        # family-graph node spacing; <1 tighter (infoboxes), >1 looser\n" +
+			"# id: my-graph      # stable id; required to lock node positions in place\n" +
 			"# center: \"[[Other Note]]\"      # override the focus note\n" +
 			"```",
 		);

@@ -1,6 +1,6 @@
 import { App, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, parseYaml, setIcon, TFile } from "obsidian";
 import { Core } from "cytoscape";
-import { RelationsSettings, LayoutStore } from "./types";
+import { RelationsSettings, PositionStore } from "./types";
 import { buildFullGraph, buildLocalGraph, buildFamilyNeighborhood } from "./graph";
 import { renderGraph } from "./render";
 import type { GraphCache } from "./graph-cache";
@@ -44,11 +44,14 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		private settings: RelationsSettings,
 		private options: ParsedOptions,
 		private ctx: MarkdownPostProcessorContext,
-		private sourcePath: string,
 		private cache: GraphCache | null,
-		private store: LayoutStore | null,
+		private store: PositionStore | null,
 	) {
 		super(containerEl);
+	}
+
+	private get sourcePath(): string {
+		return this.ctx.sourcePath;
 	}
 
 	onload(): void {
@@ -145,6 +148,8 @@ class RelationsBlockChild extends MarkdownRenderChild {
 	}
 
 	private render(): void {
+		this.cy?.destroy();
+		this.cy = null;
 		const el = this.containerEl;
 		el.empty();
 
@@ -292,10 +297,10 @@ export function processRelationsBlock(
 	el: HTMLElement,
 	ctx: MarkdownPostProcessorContext,
 	cache: GraphCache | null = null,
-	store: LayoutStore | null = null,
+	store: PositionStore | null = null,
 ): void {
 	const options = parseOptions(source);
-	const child = new RelationsBlockChild(el, app, settings, options, ctx, ctx.sourcePath, cache, store);
+	const child = new RelationsBlockChild(el, app, settings, options, ctx, cache, store);
 	ctx.addChild(child);
 }
 
