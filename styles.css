@@ -337,7 +337,7 @@
 .relations-lock-group {
 	position: absolute;
 	top: 6px;
-	right: 6px;
+	right: 34px;
 	z-index: 5;
 	display: flex;
 	gap: 4px;
