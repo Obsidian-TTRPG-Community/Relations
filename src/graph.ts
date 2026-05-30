@@ -369,7 +369,7 @@ function hasRequiredTag(cache: CachedMetadata, requiredTags: string[]): boolean 
 	});
 }
 
-function extractLinkTargets(value: unknown): string[] {
+export function extractLinkTargets(value: unknown): string[] {
 	if (value == null) return [];
 	if (Array.isArray(value)) {
 		return value.flatMap((v) => extractLinkTargets(v));
@@ -392,7 +392,7 @@ function extractLinkTargets(value: unknown): string[] {
 	return [stripAlias(s)];
 }
 
-function stripAlias(link: string): string {
+export function stripAlias(link: string): string {
 	const pipeIdx = link.indexOf("|");
 	if (pipeIdx >= 0) link = link.slice(0, pipeIdx);
 	const hashIdx = link.indexOf("#");
@@ -400,7 +400,7 @@ function stripAlias(link: string): string {
 	return link.trim();
 }
 
-function dedupeEdges(edges: GraphEdge[]): GraphEdge[] {
+export function dedupeEdges(edges: GraphEdge[]): GraphEdge[] {
 	const seen = new Set<string>();
 	const out: GraphEdge[] = [];
 	for (const e of edges) {
