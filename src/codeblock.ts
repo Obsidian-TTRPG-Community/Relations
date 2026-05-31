@@ -187,7 +187,8 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for family view." });
 				return;
 			}
-			graph = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, this.cache);
+			const familyDepth = this.options.depthExplicit ? effectiveDepth : undefined;
+			graph = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache);
 			highlightId = hostFile.path;
 		} else if (this.options.scope === "full") {
 			graph = buildFullGraph(this.app, this.settings, this.cache);
@@ -314,6 +315,7 @@ export function processRelationsBlock(
 
 interface ParsedOptions extends CodeBlockOptions {
 	sizeExplicit: boolean;
+	depthExplicit: boolean;
 }
 
 /**
@@ -346,11 +348,11 @@ function parseOptions(source: string): ParsedOptions {
 		rawSize === "mini" || rawSize === "small" || rawSize === "large";
 	const size: EmbedSize = sizeExplicit ? (rawSize as EmbedSize) : "small";
 
-	let depth = parsed["depth"] as number | undefined;
-	if (typeof depth !== "number" || isNaN(depth)) {
-		depth = size === "large" ? 3 : 1;
-	}
-	depth = Math.max(0, Math.min(6, Math.floor(depth)));
+	const rawDepth = parsed["depth"] as number | undefined;
+	const depthExplicit = typeof rawDepth === "number" && !isNaN(rawDepth);
+	const depth = Math.max(0, Math.min(6, Math.floor(
+		depthExplicit ? rawDepth : (size === "large" ? 3 : 1),
+	)));
 
 	const scope = parsed["scope"] === "full" ? "full" : "local";
 	const tree = parsed["tree"] === true;
@@ -411,7 +413,7 @@ function parseOptions(source: string): ParsedOptions {
 			? String(rawId)
 			: undefined;
 
-	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, sizeExplicit };
+	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, sizeExplicit, depthExplicit };
 }
 
 function resolveHostFile(app: App, hostPath: string, sourcePath: string): TFile | null {

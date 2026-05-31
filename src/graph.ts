@@ -182,11 +182,11 @@ export function buildFamilyNeighborhood(
 	app: App,
 	settings: RelationsSettings,
 	focusPath: string,
+	depth?: number,
 	cache: GraphCache | null = null,
 ): RelationsGraph {
 	const full = buildFullGraph(app, settings, cache);
 
-	// If the focus note doesn't appear in the graph at all, return just it.
 	if (!full.nodes.some((n) => n.id === focusPath)) {
 		const f = app.vault.getAbstractFileByPath(focusPath);
 		if (f instanceof TFile) {
@@ -196,11 +196,18 @@ export function buildFamilyNeighborhood(
 		return { nodes: [], edges: [] };
 	}
 
-	// Build genealogy adjacency in both directions:
-	//   childrenOf[parent] = list of children declared with that parent
-	//   parentsOf[child]   = list of parents
-	// Conventionally, our edges go child->parent (the child note declares its
-	// parents), so genealogy edge.source = child, edge.target = parent.
+	return filterFamilyNeighborhood(full, focusPath, depth);
+}
+
+export function filterFamilyNeighborhood(
+	full: RelationsGraph,
+	focusPath: string,
+	depth?: number,
+): RelationsGraph {
+	if (!full.nodes.some((n) => n.id === focusPath)) {
+		return { nodes: [], edges: [] };
+	}
+
 	const childrenOf = new Map<string, Set<string>>();
 	const parentsOf = new Map<string, Set<string>>();
 	const partnersOf = new Map<string, Set<string>>();
@@ -220,38 +227,38 @@ export function buildFamilyNeighborhood(
 		}
 	}
 
-	// Walk ancestors up.
+	const maxGen = (depth != null && depth >= 0) ? depth : Infinity;
 	const included = new Set<string>([focusPath]);
-	const ancestorQueue = [focusPath];
-	while (ancestorQueue.length > 0) {
-		const cur = ancestorQueue.shift()!;
-		const parents = parentsOf.get(cur);
-		if (!parents) continue;
-		for (const p of parents) {
-			if (included.has(p)) continue;
-			included.add(p);
-			ancestorQueue.push(p);
+	let ancestorFrontier: string[] = [focusPath];
+	for (let gen = 0; gen < maxGen && ancestorFrontier.length > 0; gen++) {
+		const next: string[] = [];
+		for (const cur of ancestorFrontier) {
+			const parents = parentsOf.get(cur);
+			if (!parents) continue;
+			for (const p of parents) {
+				if (included.has(p)) continue;
+				included.add(p);
+				next.push(p);
+			}
 		}
+		ancestorFrontier = next;
 	}
-	// Walk descendants down.
-	const descendantQueue = [focusPath];
-	while (descendantQueue.length > 0) {
-		const cur = descendantQueue.shift()!;
-		const children = childrenOf.get(cur);
-		if (!children) continue;
-		for (const c of children) {
-			if (included.has(c)) continue;
-			included.add(c);
-			descendantQueue.push(c);
+	let descendantFrontier: string[] = [focusPath];
+	for (let gen = 0; gen < maxGen && descendantFrontier.length > 0; gen++) {
+		const next: string[] = [];
+		for (const cur of descendantFrontier) {
+			const children = childrenOf.get(cur);
+			if (!children) continue;
+			for (const c of children) {
+				if (included.has(c)) continue;
+				included.add(c);
+				next.push(c);
+			}
 		}
+		descendantFrontier = next;
 	}
 
-	// Pull in co-parents — anyone who shares a child with someone we've already
-	// included. This catches partners that aren't ancestors/descendants of the
-	// focus, e.g. Arthur's partner Morgause when the focus is Arthur (Morgause
-	// isn't anyone's ancestor in Arthur's line, but she's the mother of his
-	// child and so should appear).
-	const focusFamily = new Set(included);  // snapshot before adding co-parents
+	const focusFamily = new Set(included);
 	for (const personId of focusFamily) {
 		const kids = childrenOf.get(personId);
 		if (!kids) continue;
@@ -264,8 +271,6 @@ export function buildFamilyNeighborhood(
 		}
 	}
 
-	// Pull in declared partners (pair edges) of anyone in the family — covers
-	// childless marriages like Arthur+Guinevere.
 	for (const personId of [...included]) {
 		const partners = partnersOf.get(personId);
 		if (!partners) continue;
@@ -273,9 +278,6 @@ export function buildFamilyNeighborhood(
 	}
 
 	const nodes = full.nodes.filter((n) => included.has(n.id));
-	// Only keep genealogy + pair edges, and only those whose endpoints are both
-	// in the neighbourhood. Other relationship types (ally, enemy, etc.) are
-	// dropped — family-graph mode doesn't show them.
 	const edges = full.edges.filter(
 		(e) => (e.genealogy || e.pair) && included.has(e.source) && included.has(e.target),
 	);
