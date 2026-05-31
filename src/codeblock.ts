@@ -1,8 +1,8 @@
 import { App, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, parseYaml, setIcon, TFile } from "obsidian";
 import { Core } from "cytoscape";
-import { RelationsSettings, PositionStore } from "./types";
+import { RelationsSettings, PositionStore, RelationshipType } from "./types";
 import { buildFullGraph, buildLocalGraph, buildFamilyNeighborhood } from "./graph";
-import { renderGraph } from "./render";
+import { renderGraph, synthesizeInformalPartnerships, INFORMAL_PARTNERSHIP_LEGEND } from "./render";
 import type { GraphCache } from "./graph-cache";
 
 export type EmbedSize = "mini" | "small" | "large";
@@ -231,10 +231,16 @@ class RelationsBlockChild extends MarkdownRenderChild {
 
 		if (effectiveSize !== "mini" && this.settings.showLegend) {
 			const usedTypes = new Set(graph.edges.map((e) => e.type));
-			const visibleTypes = this.settings.relationshipTypes.filter((t) => usedTypes.has(t.name));
-			if (visibleTypes.length > 0) {
+			const legendTypes: RelationshipType[] = this.settings.relationshipTypes.filter((t) => usedTypes.has(t.name));
+			// Family-graph mode synthesizes a dotted-grey "informal partnership" line
+			// between co-parents with no declared spouse. It isn't a configured type,
+			// so document it explicitly when the graph actually contains one.
+			if (this.options.familyGraph && synthesizeInformalPartnerships(graph).length > 0) {
+				legendTypes.push(INFORMAL_PARTNERSHIP_LEGEND);
+			}
+			if (legendTypes.length > 0) {
 				const legend = el.createDiv({ cls: "relations-legend" });
-				renderLegend(legend, visibleTypes);
+				renderLegend(legend, legendTypes);
 			}
 		}
 	}

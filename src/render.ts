@@ -2,7 +2,7 @@ import { App, TFile, Menu } from "obsidian";
 import cytoscape, { Core, ElementDefinition, LayoutOptions } from "cytoscape";
 import fcose from "cytoscape-fcose";
 import dagre from "cytoscape-dagre";
-import { RelationsGraph, RelationsSettings, GraphEdge } from "./types";
+import { RelationsGraph, RelationsSettings, GraphEdge, RelationshipType } from "./types";
 import { applyGenerationLayout } from "./family-tree";
 import { drawFamilyConnectors } from "./family-connectors";
 
@@ -175,46 +175,10 @@ export function renderGraph(opts: RenderOptions): Core {
 			return { ...e, source: e.target, target: e.source };
 		});
 
-		// Find shared-children co-parents that aren't already in a pair edge.
-		// Walk genealogy edges (now parent->child after inversion) and group by
-		// child id (= edge.target).
-		const parentSets = new Map<string, string[]>();
-		for (const e of filtered) {
-			if (!e.genealogy) continue;
-			if (!parentSets.has(e.target)) parentSets.set(e.target, []);
-			parentSets.get(e.target)!.push(e.source);
-		}
-		const declaredPairs = new Set<string>();
-		for (const e of filtered) {
-			if (!e.pair) continue;
-			declaredPairs.add(pairKey(e.source, e.target));
-		}
-		// For each child with two+ parents, emit a synthetic informal-partnership
-		// edge between each pair of co-parents that don't already have one.
-		const synthesized: GraphEdge[] = [];
-		const synthesizedKeys = new Set<string>();
-		for (const parents of parentSets.values()) {
-			for (let i = 0; i < parents.length; i++) {
-				for (let j = i + 1; j < parents.length; j++) {
-					const a = parents[i];
-					const b = parents[j];
-					const k = pairKey(a, b);
-					if (declaredPairs.has(k)) continue;
-					if (synthesizedKeys.has(k)) continue;
-					synthesizedKeys.add(k);
-					synthesized.push({
-						source: a,
-						target: b,
-						type: "__informal_partnership",  // synthetic; not a real configured type
-						color: "#888888",                  // muted grey to read as "implied, not declared"
-						symmetric: true,
-						pair: true,
-						lineStyle: "dotted",
-						genealogy: false,
-					});
-				}
-			}
-		}
+		// Synthesize "informal partnership" edges between co-parents with no
+		// declared pair edge. Extracted so the legend builder can detect the same
+		// condition without duplicating the logic (see synthesizeInformalPartnerships).
+		const synthesized = synthesizeInformalPartnerships(graph);
 		effectiveGraph = { nodes: graph.nodes, edges: [...filtered, ...synthesized] };
 	} else {
 		effectiveGraph = graph;
@@ -694,4 +658,68 @@ function averageLabelWidth(widths: Map<string, number>): number {
  * pair edges when synthesising informal-partnership edges between co-parents. */
 function pairKey(a: string, b: string): string {
 	return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+/** Synthetic edge type tag for informal-partnership connectors (not a configured type). */
+export const INFORMAL_PARTNERSHIP_TYPE = "__informal_partnership";
+
+/**
+ * Legend representation of the synthesized informal-partnership line. Family-graph
+ * mode draws a dotted grey connector between co-parents who share a child but have
+ * no declared spouse/pair edge; since it isn't one of the user's configured
+ * relationship types it would otherwise be absent from the legend. `pair` is false
+ * here so the legend label omits the ⚭ marriage glyph — this is the unmarried case.
+ */
+export const INFORMAL_PARTNERSHIP_LEGEND: RelationshipType = {
+	name: "informal partnership",
+	color: "#888888",
+	symmetric: true,
+	pair: false,
+	treeLayout: false,
+	lineStyle: "dotted",
+	genealogy: false,
+};
+
+/**
+ * Compute the synthetic "informal partnership" edges for family-graph mode: a dotted
+ * grey connector between each pair of co-parents (people sharing a child via genealogy
+ * edges) who have no declared pair edge between them. Operates on the raw graph; safe
+ * to call independently of rendering (the legend builder uses it to decide whether to
+ * show the informal-partnership entry).
+ */
+export function synthesizeInformalPartnerships(graph: RelationsGraph): GraphEdge[] {
+	// Group parents by child. Raw genealogy edges run child→parent (source=child).
+	const parentsByChild = new Map<string, string[]>();
+	for (const e of graph.edges) {
+		if (!e.genealogy) continue;
+		if (!parentsByChild.has(e.source)) parentsByChild.set(e.source, []);
+		parentsByChild.get(e.source)!.push(e.target);
+	}
+	const declaredPairs = new Set<string>();
+	for (const e of graph.edges) {
+		if (!e.pair) continue;
+		declaredPairs.add(pairKey(e.source, e.target));
+	}
+	const synthesized: GraphEdge[] = [];
+	const seen = new Set<string>();
+	for (const parents of parentsByChild.values()) {
+		for (let i = 0; i < parents.length; i++) {
+			for (let j = i + 1; j < parents.length; j++) {
+				const k = pairKey(parents[i], parents[j]);
+				if (declaredPairs.has(k) || seen.has(k)) continue;
+				seen.add(k);
+				synthesized.push({
+					source: parents[i],
+					target: parents[j],
+					type: INFORMAL_PARTNERSHIP_TYPE,  // synthetic; not a real configured type
+					color: "#888888",                  // muted grey to read as "implied, not declared"
+					symmetric: true,
+					pair: true,
+					lineStyle: "dotted",
+					genealogy: false,
+				});
+			}
+		}
+	}
+	return synthesized;
 }
