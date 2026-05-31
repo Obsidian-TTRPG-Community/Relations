@@ -23,10 +23,13 @@ export interface RenderOptions {
 	graph: RelationsGraph;
 	highlightId?: string;
 	useTreeLayout?: boolean;
-	familyGraph?: boolean;      // generation-aligned positioning + Cytoscape edges,
-	                            // edge styles differentiated by relationship type
-	                            // (marriage solid, informal partnership dotted,
-	                            // parent→child arrowed). Active-note focused.
+	familyMode?: "graph" | "tree";
+	                            // Family view, active-note focused, generation-aligned.
+	                            // "graph": Cytoscape edges differentiated by relationship
+	                            //   type (marriage solid, informal partnership dotted,
+	                            //   parent→child arrowed) — the original graph-style view.
+	                            // "tree": orthogonal SVG connectors (vertical drops +
+	                            //   sibling distribution bars) for a true family-tree look.
 	interactive?: boolean;
 	compact?: boolean;
 	zoomMultiplier?: number;    // applied AFTER fit; >1 zooms in, <1 zooms out. Default 1.
@@ -139,7 +142,7 @@ function measureLabelWidths(
 
 export function renderGraph(opts: RenderOptions): Core {
 	ensureExtensions();
-	const { app, settings, container, graph, highlightId, useTreeLayout, compact, familyGraph } = opts;
+	const { app, settings, container, graph, highlightId, useTreeLayout, compact, familyMode } = opts;
 	// Label visibility: explicit per-call override wins, else fall back to the
 	// global setting (default true for back-compat with vaults predating this option).
 	const showLabels = opts.showLabels ?? settings.showNodeLabels ?? true;
@@ -154,16 +157,17 @@ export function renderGraph(opts: RenderOptions): Core {
 
 	// Edge filtering and synthesis varies by mode:
 	//
-	// familyGraph (graph-style family): keep only genealogy + pair edges (same as
-	//   the side-panel filters), AND synthesize "informal partnership" edges
-	//   between any two people who share a child but have no declared pair edge
-	//   between them. Without this synthesis, an unmarried couple's relationship
-	//   is only readable by tracing two arrows down to a shared kid — explicit
-	//   dotted line between them makes it instantly visible.
+	// Family modes (graph + tree): keep only genealogy + pair edges (same as the
+	//   side-panel filters), AND synthesize "informal partnership" edges between
+	//   any two people who share a child but have no declared pair edge between
+	//   them. Without this synthesis, an unmarried couple's relationship is only
+	//   readable by tracing two arrows down to a shared kid — an explicit dotted
+	//   line between them makes it instantly visible. Both family modes filter and
+	//   synthesize identically; they differ only in how connectors are drawn.
 	//
 	// Other modes: pass the graph through unchanged.
 	let effectiveGraph: RelationsGraph;
-	if (familyGraph) {
+	if (familyMode) {
 		const filteredRaw = graph.edges.filter((e) => e.genealogy || e.pair);
 
 		// Genealogy edges in our data go child→parent (the child's note declares
@@ -207,15 +211,16 @@ export function renderGraph(opts: RenderOptions): Core {
 
 	// Pick the layout. Two cases:
 	//
-	// familyGraph: skip layout (preset placeholder). Positions are computed by
+	// Family modes: skip layout (preset placeholder). Positions are computed by
 	//   applyGenerationLayout after init — generation-aligned rows with parents
-	//   above, partners on the same row, children below. Cytoscape draws its
-	//   own type-differentiated edges (solid for marriage, dotted for informal,
-	//   arrowed for genealogy).
+	//   above, partners on the same row, children below. Tree mode then overlays
+	//   orthogonal SVG connectors; graph mode keeps Cytoscape's own type-
+	//   differentiated edges (solid for marriage, dotted for informal, arrowed
+	//   for genealogy).
 	//
 	// Otherwise: standard pickLayout.
 	const hasPresets = !!opts.presetPositions && Object.keys(opts.presetPositions).length > 0;
-	const initialLayout = (familyGraph || hasPresets)
+	const initialLayout = (familyMode || hasPresets)
 		? ({ name: "preset" } as cytoscape.LayoutOptions)
 		: pickLayout(settings, useTreeLayout, effectiveGraph, !!compact, labelWidths);
 
@@ -251,7 +256,7 @@ export function renderGraph(opts: RenderOptions): Core {
 				missing.push(node.id());
 			}
 		});
-		if (missing.length > 0 && familyGraph) {
+		if (missing.length > 0 && familyMode) {
 			const spacing = opts.spacing ?? (compact ? 0.55 : 1);
 			applyGenerationLayout(cy, graph, { spacing });
 			cy.nodes().forEach((node) => {
@@ -267,12 +272,15 @@ export function renderGraph(opts: RenderOptions): Core {
 				cy.getElementById(id).position({ x: startX, y: startY + idx * 80 });
 			});
 		}
-	} else if (familyGraph) {
+	} else if (familyMode) {
 		const spacing = opts.spacing ?? (compact ? 0.55 : 1);
 		applyGenerationLayout(cy, graph, { spacing });
 	}
 
-	if (familyGraph) {
+	// Tree mode only: replace Cytoscape's bezier genealogy edges with orthogonal
+	// SVG connectors for the classic family-tree look. Graph mode keeps the
+	// Cytoscape edges (arrowed parent→child, relationship-typed line styles).
+	if (familyMode === "tree") {
 		drawFamilyConnectors(cy, graph, container, !!compact);
 	}
 

@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test / build caches
+coverage/
+.vitest/
+
+# Note: main.js, manifest.json, styles.css are intentionally tracked —
+# the repo ships them and BRAT/manual installs read them.

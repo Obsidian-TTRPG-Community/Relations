@@ -13,10 +13,12 @@ interface CodeBlockOptions {
 	center?: string;
 	scope?: "local" | "full";
 	tree?: boolean;
-	familyGraph?: boolean;  // family view: generation-aligned positioning + Cytoscape
-	                        // edges differentiated by relationship type (marriage solid,
-	                        // informal partnership dotted, parent→child arrowed).
-	                        // Centered on the active/host note's family neighbourhood.
+	familyMode?: "graph" | "tree";  // family view, centered on the host note's family
+	                        // neighbourhood, generation-aligned. "graph": Cytoscape edges
+	                        // differentiated by relationship type (marriage solid, informal
+	                        // partnership dotted, parent→child arrowed) — the original
+	                        // graph-style view. "tree": orthogonal SVG connectors for a
+	                        // true family-tree look.
 	zoom?: number;
 	height?: string;          // overrides the size's default height; e.g. "800px", "60vh"
 	labels?: boolean;         // show note name under each node; overrides the global
@@ -178,7 +180,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		let graph;
 		let highlightId: string | undefined;
 
-		const useFamilyNeighbourhood = this.options.familyGraph && this.options.scope !== "full";
+		const useFamilyNeighbourhood = this.options.familyMode && this.options.scope !== "full";
 
 		if (useFamilyNeighbourhood) {
 			if (!hostFile) {
@@ -219,7 +221,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			graph,
 			highlightId,
 			useTreeLayout: this.options.tree,
-			familyGraph: this.options.familyGraph,
+			familyMode: this.options.familyMode,
 			compact: effectiveSize === "mini",
 			zoomMultiplier: this.options.zoom,
 			showLabels: this.options.labels,
@@ -232,10 +234,10 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		if (effectiveSize !== "mini" && this.settings.showLegend) {
 			const usedTypes = new Set(graph.edges.map((e) => e.type));
 			const legendTypes: RelationshipType[] = this.settings.relationshipTypes.filter((t) => usedTypes.has(t.name));
-			// Family-graph mode synthesizes a dotted-grey "informal partnership" line
+			// Both family modes synthesize a dotted-grey "informal partnership" line
 			// between co-parents with no declared spouse. It isn't a configured type,
 			// so document it explicitly when the graph actually contains one.
-			if (this.options.familyGraph && synthesizeInformalPartnerships(graph).length > 0) {
+			if (this.options.familyMode && synthesizeInformalPartnerships(graph).length > 0) {
 				legendTypes.push(INFORMAL_PARTNERSHIP_LEGEND);
 			}
 			if (legendTypes.length > 0) {
@@ -314,6 +316,20 @@ interface ParsedOptions extends CodeBlockOptions {
 	sizeExplicit: boolean;
 }
 
+/**
+ * Resolve which family view (if any) a code block requests. Two active-note-focused,
+ * generation-aligned views; both accept kebab-case (preferred) and camelCase aliases:
+ *   family-tree  → "tree":  orthogonal SVG connectors, a true family-tree look.
+ *   family-graph → "graph": the original graph-style view — Cytoscape edges styled by
+ *     relationship type (marriage solid, informal partnership dotted, parent→child arrowed).
+ * If both are set, tree wins. Pure (no Obsidian deps) so it can be unit-tested directly.
+ */
+export function resolveFamilyMode(parsed: Record<string, unknown>): "graph" | "tree" | undefined {
+	if (parsed["family-tree"] === true || parsed["familyTree"] === true) return "tree";
+	if (parsed["family-graph"] === true || parsed["familyGraph"] === true) return "graph";
+	return undefined;
+}
+
 function parseOptions(source: string): ParsedOptions {
 	let parsed: Record<string, unknown> = {};
 	try {
@@ -338,10 +354,7 @@ function parseOptions(source: string): ParsedOptions {
 
 	const scope = parsed["scope"] === "full" ? "full" : "local";
 	const tree = parsed["tree"] === true;
-	// "family-graph" enables the family view: active-note focused, generation-aligned,
-	// edges styled by relationship type (marriage solid, informal partnership dotted,
-	// parent→child arrowed). Accept kebab-case (preferred) and camelCase aliases.
-	const familyGraph = parsed["family-graph"] === true || parsed["familyGraph"] === true;
+	const familyMode = resolveFamilyMode(parsed);
 	const center = typeof parsed["center"] === "string" ? (parsed["center"] as string) : undefined;
 
 	// labels: explicit true/false hides or shows note names for this block,
@@ -398,7 +411,7 @@ function parseOptions(source: string): ParsedOptions {
 			? String(rawId)
 			: undefined;
 
-	return { ...DEFAULTS, size, depth, scope, tree, familyGraph, center, zoom, height, labels, spacing, id, sizeExplicit };
+	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, sizeExplicit };
 }
 
 function resolveHostFile(app: App, hostPath: string, sourcePath: string): TFile | null {
