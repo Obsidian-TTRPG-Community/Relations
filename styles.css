@@ -337,7 +337,7 @@
 .relations-lock-group {
 	position: absolute;
 	top: 6px;
-	right: 34px;
+	right: 6px;
 	z-index: 5;
 	display: flex;
 	gap: 4px;
@@ -395,4 +395,26 @@
 .relations-lock-btn .svg-icon {
 	width: 16px;
 	height: 16px;
+}
+
+/* Inline edge label editor — appears at the double-click point when the user
+   wants to add or change a short label on a relationship line ("hates them 75%").
+   The input is absolutely-positioned inside the embed container so it tracks
+   with scroll/resize, and centers itself on the click point. */
+.relations-edge-label-editor {
+	z-index: 10;
+	padding: 4px 8px;
+	min-width: 140px;
+	max-width: 240px;
+	font-size: 13px;
+	color: var(--text-normal);
+	background-color: var(--background-primary);
+	border: 1px solid var(--interactive-accent);
+	border-radius: 4px;
+	outline: none;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.relations-edge-label-editor::placeholder {
+	color: var(--text-faint);
 }

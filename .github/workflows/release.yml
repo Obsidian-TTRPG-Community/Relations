@@ -1,35 +1,81 @@
 name: Release
 
-# Triggered when a tag matching a semver-ish pattern is pushed. The workflow
-# builds the plugin from source, attests provenance for the release artifacts
-# (main.js + styles.css), and uploads them to the GitHub release page.
-#
-# Attestation lets users cryptographically verify that the binary they're
-# downloading was built from this repository's source at this commit, rather
-# than uploaded from somewhere else. It's a recommendation from the Obsidian
-# community-plugin auto-reviewer.
+# Fires when a version tag is pushed (either by release-please after a release
+# PR merge, or by hand for emergency releases). Builds the plugin from source
+# at the tagged commit, verifies the tag matches manifest.json's version
+# (preventing the 0.15.0/0.15.1 mismatch BRAT complains about), attests
+# provenance, and uploads main.js + manifest.json + styles.css as release
+# assets. Release notes are read from CHANGELOG.md if present (release-please
+# maintains it), or fall back to auto-generated notes from commit messages.
+
 on:
   push:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
-  contents: write       # to upload release assets
-  id-token: write       # to mint the OIDC token used for attestation
+  contents: write       # to create the GitHub release and upload assets
+  id-token: write       # to mint the OIDC token used for build provenance
   attestations: write   # to write the attestation
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
+      - name: Checkout source at the tagged commit
         uses: actions/checkout@v4
 
-      - name: Set up Node
+      - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
+
+      # Version-consistency guard. The tag that triggered this workflow MUST
+      # equal the version field in manifest.json. If they don't match, BRAT
+      # surfaces a "Version mismatch detected" warning to every user. We catch
+      # it here instead, fail the build loudly, and prevent the release.
+      #
+      # The workflow trigger restricts to semver-shaped tags, so we know
+      # GITHUB_REF_NAME is the bare version (e.g. "0.15.2").
+      - name: Verify tag matches manifest.json
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          manifest_version=$(node -p "require('./manifest.json').version")
+          echo "Tag:              $tag"
+          echo "Manifest version: $manifest_version"
+          if [ "$tag" != "$manifest_version" ]; then
+            echo "::error::Tag ($tag) does not match manifest.json version ($manifest_version). Bump manifest.json + versions.json + package.json before tagging."
+            exit 1
+          fi
+
+      # Also verify package.json matches, because release-please bumps all
+      # three files in lockstep and they should stay coherent. A drift here is
+      # a sign that the release was prepared by hand and might be missing
+      # other bumps.
+      - name: Verify tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          pkg_version=$(node -p "require('./package.json').version")
+          echo "Tag:             $tag"
+          echo "Package version: $pkg_version"
+          if [ "$tag" != "$pkg_version" ]; then
+            echo "::error::Tag ($tag) does not match package.json version ($pkg_version)."
+            exit 1
+          fi
+
+      # Verify versions.json has an entry for this tag. BRAT and the Obsidian
+      # community-plugin catalogue both read versions.json to know the
+      # minAppVersion required for a given plugin version. A missing entry
+      # means future users can't determine compatibility.
+      - name: Verify versions.json has tag entry
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          has_entry=$(node -p "Object.keys(require('./versions.json')).includes('$tag')")
+          if [ "$has_entry" != "true" ]; then
+            echo "::error::versions.json has no entry for $tag. Add it before tagging."
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -40,6 +86,16 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify build artifacts exist
+        run: |
+          test -f main.js || { echo "::error::main.js missing after build"; exit 1; }
+          test -f manifest.json || { echo "::error::manifest.json missing"; exit 1; }
+          test -f styles.css || { echo "::error::styles.css missing"; exit 1; }
+          echo "main.js size: $(stat -c%s main.js) bytes"
+
+      # Attestation lets users cryptographically verify the binary was built
+      # from this repository's source at this commit. Recommended by the
+      # Obsidian community-plugin auto-reviewer.
       - name: Generate build provenance attestation
         uses: actions/attest-build-provenance@v1
         with:
@@ -48,11 +104,58 @@ jobs:
             styles.css
             manifest.json
 
-      - name: Create GitHub release
+      # release-please maintains CHANGELOG.md with entries grouped under
+      # "## [version]" headers. If we find a section for this tag we use it;
+      # otherwise fall back to GitHub's auto-generated notes from commits.
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [ -f CHANGELOG.md ]; then
+            section=$(awk -v tag="$tag" '
+              /^## (\[)?/{
+                if (in_section) exit;
+                if ($0 ~ "## (\\[)?" tag "(\\]|[[:space:]]|$)") { in_section=1; next }
+              }
+              in_section { print }
+            ' CHANGELOG.md)
+            if [ -n "$section" ]; then
+              echo "Found CHANGELOG.md section for $tag"
+              {
+                echo 'notes<<NOTES_EOF'
+                echo "$section"
+                echo 'NOTES_EOF'
+              } >> "$GITHUB_OUTPUT"
+              echo "use_changelog=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "No CHANGELOG.md section for $tag, falling back to auto-generated notes"
+              echo "use_changelog=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "CHANGELOG.md not present, falling back to auto-generated notes"
+            echo "use_changelog=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub release (with CHANGELOG notes)
+        if: steps.notes.outputs.use_changelog == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: ${{ steps.notes.outputs.notes }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          notes_file=$(mktemp)
+          printf '%s' "$NOTES" > "$notes_file"
+          gh release create "$tag" \
+            --title="$tag" \
+            --notes-file "$notes_file" \
+            main.js styles.css manifest.json
+
+      - name: Create GitHub release (with auto-generated notes)
+        if: steps.notes.outputs.use_changelog != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
+          tag="${GITHUB_REF_NAME}"
           gh release create "$tag" \
             --title="$tag" \
             --generate-notes \
