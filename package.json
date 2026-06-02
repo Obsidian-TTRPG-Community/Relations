@@ -1,6 +1,6 @@
 {
   "name": "relations",
-  "version": "0.15.3",
+  "version": "0.15.4",
   "description": "Visualise relationships between Obsidian notes",
   "main": "main.js",
   "scripts": {

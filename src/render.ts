@@ -171,18 +171,23 @@ export function renderGraph(opts: RenderOptions): Core {
 	//   synthesize identically; they differ only in how connectors are drawn.
 	//
 	// Other modes: pass the graph through unchanged.
+	// Genealogy edges in our data go child→parent — the child's note declares
+	// its parents in frontmatter, and the data model mirrors that direction.
+	// For rendering we always invert these so arrows visually run parent→child,
+	// which is how genealogy charts are conventionally read. Pair edges stay
+	// as-is — they're symmetric anyway.
+	//
+	// Inverting in EVERY mode (not just family modes) fixes a longstanding bug
+	// where the standard graph view drew arrows child→parent — a child note
+	// with `parent: "[[X]]"` appeared to "be the parent of" X, which is the
+	// opposite of what users expect.
+	const invertGenealogy = (e: GraphEdge): GraphEdge =>
+		e.genealogy ? { ...e, source: e.target, target: e.source } : e;
+
 	let effectiveGraph: RelationsGraph;
 	if (familyMode) {
 		const filteredRaw = graph.edges.filter((e) => e.genealogy || e.pair);
-
-		// Genealogy edges in our data go child→parent (the child's note declares
-		// its parents in frontmatter). For the family-graph view we invert these
-		// so arrows visually run parent→child, which is how genealogy charts are
-		// conventionally read. Pair edges stay as-is — they're symmetric anyway.
-		const filtered: GraphEdge[] = filteredRaw.map((e) => {
-			if (!e.genealogy) return e;
-			return { ...e, source: e.target, target: e.source };
-		});
+		const filtered: GraphEdge[] = filteredRaw.map(invertGenealogy);
 
 		// Synthesize "informal partnership" edges between co-parents with no
 		// declared pair edge. Extracted so the legend builder can detect the same
@@ -190,7 +195,9 @@ export function renderGraph(opts: RenderOptions): Core {
 		const synthesized = synthesizeInformalPartnerships(graph);
 		effectiveGraph = { nodes: graph.nodes, edges: [...filtered, ...synthesized] };
 	} else {
-		effectiveGraph = graph;
+		// Non-family modes: keep all edges (allies, enemies, etc.), but still
+		// invert genealogy so the arrow on a `parent` edge reads correctly.
+		effectiveGraph = { nodes: graph.nodes, edges: graph.edges.map(invertGenealogy) };
 	}
 
 	const labelStore = opts.labelStore ?? null;
@@ -207,7 +214,14 @@ export function renderGraph(opts: RenderOptions): Core {
 		// Synthetic informal-partnership edges don't have a canonical relationship
 		// type configured; labels on them aren't supported in this release.
 		if (e.type === INFORMAL_PARTNERSHIP_TYPE) return "";
-		return labelStore.getLabel(edgeLabelKey(e.source, e.type, e.target, typeIsSymmetric(e))) ?? "";
+		// Genealogy edges have been inverted for display (source=parent,
+		// target=child), but labels are keyed against the canonical raw
+		// direction (source=child, target=parent — matching the frontmatter
+		// declaration). Un-invert here so the storage key stays stable
+		// regardless of which view rendered the label.
+		const keySource = e.genealogy ? e.target : e.source;
+		const keyTarget = e.genealogy ? e.source : e.target;
+		return labelStore.getLabel(edgeLabelKey(keySource, e.type, keyTarget, typeIsSymmetric(e))) ?? "";
 	};
 
 	const elements = toCytoscape(effectiveGraph, highlightId, lookupLabel);
@@ -461,7 +475,14 @@ export function renderGraph(opts: RenderOptions): Core {
 			const source = edge.data("source") as string;
 			const target = edge.data("target") as string;
 			const symmetric = edge.data("symmetric") === "true";
-			const key = edgeLabelKey(source, type, target, symmetric);
+			const genealogy = edge.data("genealogy") === "true";
+			// Genealogy edges have been inverted for display (source=parent,
+			// target=child), but labels are keyed against the canonical raw
+			// direction (source=child, target=parent — matching the frontmatter
+			// declaration). Un-invert here to match the lookup in lookupLabel.
+			const keySource = genealogy ? target : source;
+			const keyTarget = genealogy ? source : target;
+			const key = edgeLabelKey(keySource, type, keyTarget, symmetric);
 			const current = labelStore.getLabel(key) ?? "";
 
 			const orig = evt.originalEvent as MouseEvent;
@@ -607,6 +628,10 @@ function toCytoscape(
 				lineStyle: e.lineStyle ?? "solid",
 				userLabel,
 				symmetric: e.symmetric ? "true" : "false",
+				// genealogy flag exposed so the dblclick label handler knows to
+				// un-invert the direction when deriving the label storage key —
+				// see lookupLabel above for the matching logic.
+				genealogy: e.genealogy ? "true" : "false",
 			},
 			classes: classes.join(" "),
 		});
