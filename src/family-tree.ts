@@ -44,14 +44,26 @@ interface FamilyUnit {
 	y: number;                    // generation Y in graph coords (computed later)
 }
 
-// Spacing constants. Tuned to match the proportions of a classical family chart —
-// generation rows are tall enough for portraits + label, horizontal gaps wide
-// enough that adjacent siblings' labels don't crash into each other.
-const GEN_HEIGHT = 220;
-const SIBLING_GAP = 40;        // gap between adjacent children in the same unit
-const COUSIN_GAP = 80;         // gap between adjacent units in the same generation
-const SPOUSE_GAP = 220;        // distance between paired spouses (must fit label widths)
-const NODE_NOMINAL_WIDTH = 140; // a typical labeled-portrait's footprint
+// Base spacing constants at spacing=1.0. Tuned to match the proportions of a
+// classical family chart — generation rows tall enough for portraits + label,
+// horizontal gaps wide enough that adjacent siblings' labels don't collide.
+//
+// These are scaled by a `spacing` multiplier so the same algorithm can produce a
+// roomy full-screen tree (spacing ~1.0) or a tight infobox tree (spacing ~0.5).
+// Smaller spacing = nodes closer together = shorter edges and, once fit() runs,
+// larger-looking nodes in a small viewport.
+const BASE_GEN_HEIGHT = 220;
+const BASE_SIBLING_GAP = 40;        // gap between adjacent children in the same unit
+const BASE_COUSIN_GAP = 80;         // gap between adjacent units in the same generation
+const BASE_SPOUSE_GAP = 220;        // distance between paired spouses (must fit label widths)
+const BASE_NODE_NOMINAL_WIDTH = 140; // a typical labeled-portrait's footprint
+
+export interface GenerationLayoutOptions {
+	// Multiplier on all spacing constants. 1.0 = default roomy chart.
+	// < 1.0 tightens (good for infoboxes/mini embeds); > 1.0 loosens.
+	// Clamped to a sane range by the caller.
+	spacing?: number;
+}
 
 /**
  * Compute generation-aligned positions for a family graph and write them to
@@ -63,18 +75,23 @@ const NODE_NOMINAL_WIDTH = 140; // a typical labeled-portrait's footprint
  * draw any connectors. Cytoscape's own edge rendering handles the visual
  * connections, with edge styles (solid for marriage, dotted for informal,
  * arrowed for parent→child) defined in the stylesheet.
+ *
+ * `opts.spacing` scales the gap between nodes — use < 1.0 to tighten the tree
+ * for small viewports (infobox embeds), > 1.0 to spread it out.
  */
-export function applyGenerationLayout(
-	cy: Core,
-	graph: RelationsGraph,
-	opts: { spacing?: number } = {},
-): void {
-	const sp = Math.max(0.2, Math.min(3, opts.spacing ?? 1));
-	const genHeight = GEN_HEIGHT * sp;
-	const siblingGap = SIBLING_GAP * sp;
-	const cousinGap = COUSIN_GAP * sp;
-	const spouseGap = SPOUSE_GAP * sp;
-	const nodeWidth = NODE_NOMINAL_WIDTH * Math.sqrt(sp);
+export function applyGenerationLayout(cy: Core, graph: RelationsGraph, opts: GenerationLayoutOptions = {}): void {
+	// Resolve spacing multiplier and derive the working constants. A floor of
+	// 0.2 keeps nodes from overlapping entirely; a ceiling of 3 keeps the tree
+	// from flying apart.
+	const spacing = Math.max(0.2, Math.min(3, opts.spacing ?? 1));
+	const GEN_HEIGHT = BASE_GEN_HEIGHT * spacing;
+	const SIBLING_GAP = BASE_SIBLING_GAP * spacing;
+	const COUSIN_GAP = BASE_COUSIN_GAP * spacing;
+	const SPOUSE_GAP = BASE_SPOUSE_GAP * spacing;
+	// Node nominal width drives subtree-width allocation. We scale it too, but
+	// less aggressively (sqrt) — labels don't shrink linearly with spacing, so
+	// scaling width down 1:1 would let labels overlap at tight spacings.
+	const NODE_NOMINAL_WIDTH = BASE_NODE_NOMINAL_WIDTH * Math.sqrt(spacing);
 	// 1. Build adjacency: for every node, what are its parents (genealogy edges
 	//    with this node as source) and who is it paired with (pair edges).
 	const parentsOf = new Map<string, string[]>();
@@ -253,16 +270,16 @@ export function applyGenerationLayout(
 		for (let i = 0; i < unit.children.length; i++) {
 			const c = unit.children[i];
 			const ownUnits = downstreamUnitsByParent.get(c) ?? [];
-			let cw = nodeWidth;
+			let cw = NODE_NOMINAL_WIDTH;
 			for (const downstream of ownUnits) {
 				cw = Math.max(cw, subtreeWidth(downstream));
 			}
 			childrenWidth += cw;
-			if (i < unit.children.length - 1) childrenWidth += siblingGap;
+			if (i < unit.children.length - 1) childrenWidth += SIBLING_GAP;
 		}
 		const parentsWidth = unit.parents.length === 2
-			? spouseGap + nodeWidth
-			: nodeWidth;
+			? SPOUSE_GAP + NODE_NOMINAL_WIDTH
+			: NODE_NOMINAL_WIDTH;
 		const w = Math.max(parentsWidth, childrenWidth);
 		widthCache.set(unit.id, w);
 		unit.subtreeWidth = w;
@@ -284,12 +301,12 @@ export function applyGenerationLayout(
 	let cursor = 0;
 	for (const root of roots) {
 		positionUnit(root, cursor + root.subtreeWidth / 2);
-		cursor += root.subtreeWidth + cousinGap;
+		cursor += root.subtreeWidth + COUSIN_GAP;
 	}
 
 	function positionUnit(unit: FamilyUnit, centerX: number): void {
 		unit.x = centerX;
-		unit.y = unit.generation * genHeight;
+		unit.y = unit.generation * GEN_HEIGHT;
 		positionedUnits.add(unit);
 		// Position children left-to-right under this unit.
 		const children = unit.children;
@@ -301,13 +318,13 @@ export function applyGenerationLayout(
 		for (let i = 0; i < children.length; i++) {
 			const c = children[i];
 			const ownUnits = downstreamUnitsByParent.get(c) ?? [];
-			let cw = nodeWidth;
+			let cw = NODE_NOMINAL_WIDTH;
 			for (const downstream of ownUnits) {
 				cw = Math.max(cw, downstream.subtreeWidth);
 			}
 			childWidths.push(cw);
 			totalChildrenWidth += cw;
-			if (i < children.length - 1) totalChildrenWidth += siblingGap;
+			if (i < children.length - 1) totalChildrenWidth += SIBLING_GAP;
 		}
 
 		let childCursor = centerX - totalChildrenWidth / 2;
@@ -330,11 +347,11 @@ export function applyGenerationLayout(
 				}
 			} else {
 				// Leaf child — write its position.
-				childPositions.set(c, { x: cx, y: (unit.generation + 1) * genHeight });
+				childPositions.set(c, { x: cx, y: (unit.generation + 1) * GEN_HEIGHT });
 			}
 
 			childCursor += cw;
-			if (i < children.length - 1) childCursor += siblingGap;
+			if (i < children.length - 1) childCursor += SIBLING_GAP;
 		}
 	}
 
@@ -355,11 +372,11 @@ export function applyGenerationLayout(
 		if (unit.parents.length === 2) {
 			const [left, right] = unit.parents;
 			if (canonicalUnitOf.get(left) === unit) {
-				cy.getElementById(left).position({ x: unit.x - spouseGap / 2, y: unit.y });
+				cy.getElementById(left).position({ x: unit.x - SPOUSE_GAP / 2, y: unit.y });
 				positionedNodes.add(left);
 			}
 			if (canonicalUnitOf.get(right) === unit) {
-				cy.getElementById(right).position({ x: unit.x + spouseGap / 2, y: unit.y });
+				cy.getElementById(right).position({ x: unit.x + SPOUSE_GAP / 2, y: unit.y });
 				positionedNodes.add(right);
 			}
 		} else if (unit.parents.length === 1) {
@@ -382,7 +399,7 @@ export function applyGenerationLayout(
 		const pos = cy.getElementById(node.id).position();
 		if (!pos) continue;
 		const gen = generationOf.get(node.id) ?? 0;
-		const y = gen * genHeight;
+		const y = gen * GEN_HEIGHT;
 		if (!nodesByGenY.has(y)) nodesByGenY.set(y, []);
 		nodesByGenY.get(y)!.push({ id: node.id, x: pos.x });
 	}
@@ -419,7 +436,7 @@ export function applyGenerationLayout(
 		// If the preferred side is blocked by another node, we fall through to
 		// the other side and then to wider offsets.
 		const formal = unit.parentsAreMarried;
-		const baseGap = isChildless ? spouseGap : spouseGap * 1.5;
+		const baseGap = isChildless ? SPOUSE_GAP : SPOUSE_GAP * 1.5;
 		const offsets = formal
 			? [-baseGap, baseGap, -baseGap * (isChildless ? 1.5 : 0.67), baseGap * (isChildless ? 1.5 : 0.67)]
 			: [ baseGap, -baseGap,  baseGap * (isChildless ? 1.5 : 0.67), -baseGap * (isChildless ? 1.5 : 0.67)];
@@ -427,7 +444,7 @@ export function applyGenerationLayout(
 		let chosenX = placedPos.x + offsets[0];
 		for (const off of offsets) {
 			const tx = placedPos.x + off;
-			const conflict = sameRow.some((n) => n.id !== orphanId && Math.abs(n.x - tx) < spouseGap * 0.6);
+			const conflict = sameRow.some((n) => n.id !== orphanId && Math.abs(n.x - tx) < SPOUSE_GAP * 0.6);
 			if (!conflict) { chosenX = tx; break; }
 		}
 		cy.getElementById(orphanId).position({ x: chosenX, y: placedPos.y });
@@ -443,15 +460,19 @@ export function applyGenerationLayout(
 
 	// 11. Place any orphan nodes (no genealogy edges, no pair edges) off to one
 	//     side so they're visible but don't crowd the tree.
-	let orphanCursor = cursor + cousinGap;
+	let orphanCursor = cursor + COUSIN_GAP;
 	for (const node of graph.nodes) {
 		const inFamily = parentsOf.has(node.id) || downstreamUnitsByParent.has(node.id) || pairsOf.has(node.id);
 		if (!inFamily) {
 			cy.getElementById(node.id).position({ x: orphanCursor, y: 0 });
-			orphanCursor += nodeWidth + cousinGap;
+			orphanCursor += NODE_NOMINAL_WIDTH + COUSIN_GAP;
 		}
 	}
 
+	// Note: we deliberately don't call cy.fit() here. The caller (render.ts) owns
+	// viewport fitting via a ResizeObserver, using a compact-aware padding. A fit
+	// here would use a fixed padding that's wrong for small (infobox) viewports
+	// and would just be overridden moments later anyway.
 }
 
 

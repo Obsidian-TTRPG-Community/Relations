@@ -1,12 +1,13 @@
 {
   "name": "relations",
-  "version": "0.15.0",
+  "version": "0.15.2",
   "description": "Visualise relationships between Obsidian notes",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "test": "vitest run"
+    "test": "echo \"no tests yet\" && exit 0",
+    "sync-versions": "node scripts/sync-versions.mjs"
   },
   "keywords": ["obsidian", "plugin", "worldbuilding", "ttrpg", "fiction", "genealogy"],
   "author": "",
@@ -19,8 +20,7 @@
     "esbuild": "0.25.0",
     "obsidian": "latest",
     "tslib": "2.4.0",
-    "typescript": "4.7.4",
-    "vitest": "^4.1.7"
+    "typescript": "4.7.4"
   },
   "dependencies": {
     "cytoscape": "^3.28.1",

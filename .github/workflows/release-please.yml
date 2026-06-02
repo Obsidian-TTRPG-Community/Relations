@@ -1,0 +1,74 @@
+name: release-please
+
+# Maintains a release PR on `main` that bumps version numbers in manifest.json
+# and package.json, and updates CHANGELOG.md from Conventional Commits messages
+# on `main`. When the release PR is merged, release-please tags the version,
+# which triggers release.yml to build and publish.
+#
+# release-please can update plain JSON files (manifest.json) but doesn't know
+# how to extend versions.json (whose keys are version numbers). After the PR
+# is opened/updated, we run sync-versions.mjs to add the new entry to
+# versions.json and commit it to the same PR branch.
+#
+# Commit format expected:
+#   feat: short description       → minor bump
+#   fix: short description        → patch bump
+#   feat!: short description      → major bump (or any commit with `BREAKING CHANGE:` in body)
+#   chore: / docs: / refactor:    → no version bump, but appears in CHANGELOG
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write       # to create/update the release PR and to tag
+  pull-requests: write  # to open/update the release PR
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      pr_branch: ${{ steps.release.outputs['.--pr'] && fromJson(steps.release.outputs['.--pr']).headBranchName || '' }}
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  sync-versions-json:
+    # Run only when release-please has an open PR to update. We check out the
+    # PR branch, run sync-versions, and commit the change if anything moved.
+    needs: release-please
+    if: needs.release-please.outputs.pr_branch != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release-please PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.pr_branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Sync versions.json with manifest.json
+        run: node scripts/sync-versions.mjs
+
+      - name: Commit and push if versions.json changed
+        run: |
+          if [ -n "$(git status --porcelain versions.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add versions.json
+            git commit -m "chore: sync versions.json with release-please bump"
+            git push
+          else
+            echo "versions.json already in sync, nothing to commit"
+          fi

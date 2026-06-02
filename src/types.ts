@@ -12,6 +12,59 @@ export interface RelationshipType {
 
 export type GraphMode = "full" | "local";
 
+/** A saved node position in graph coordinates. */
+export interface SavedPosition {
+	x: number;
+	y: number;
+}
+
+/** One locked block's saved state: the id-keyed node positions plus a flag. */
+export interface LockedLayout {
+	locked: boolean;
+	positions: Record<string, SavedPosition>;  // node id (file path) -> position
+}
+
+/**
+ * Persistence interface for locked code-block layouts. Implemented by the plugin
+ * (backed by data.json). Code blocks read/write their saved positions through this
+ * rather than touching plugin internals directly. Keyed by the block's `id:` option.
+ */
+export interface PositionStore {
+	get(blockId: string): LockedLayout | null;
+	set(blockId: string, layout: LockedLayout): Promise<void>;
+	clear(blockId: string): Promise<void>;
+}
+
+/**
+ * Persistence interface for short inline labels on relationship edges
+ * (e.g. "hates them 75%"). Labels are global across all blocks and views —
+ * an edge between A and B carries the same label everywhere it appears.
+ *
+ * Keys are built by `edgeLabelKey()` (see below), which canonicalises the
+ * direction for symmetric relationship types so A↔B and B↔A resolve to the
+ * same label.
+ */
+export interface EdgeLabelStore {
+	getLabel(key: string): string | null;
+	setLabel(key: string, label: string): Promise<void>;
+	clearLabel(key: string): Promise<void>;
+}
+
+/**
+ * Canonical key for an edge label. For symmetric relationship types we sort
+ * the endpoints so `[A, enemy, B]` and `[B, enemy, A]` map to the same key.
+ * For asymmetric types we preserve direction so e.g. a `parent` label from
+ * A→B is distinct from a `parent` label B→A (which shouldn't happen, but if
+ * it did they'd be different relationships).
+ */
+export function edgeLabelKey(source: string, type: string, target: string, symmetric: boolean): string {
+	if (symmetric && source > target) {
+		[source, target] = [target, source];
+	}
+	return `${source}__${type}__${target}`;
+}
+
+
 export interface RelationsSettings {
 	relationshipTypes: RelationshipType[];
 
@@ -96,22 +149,6 @@ export interface GraphEdge {
 export interface RelationsGraph {
 	nodes: GraphNode[];
 	edges: GraphEdge[];
-}
-
-export interface SavedPosition {
-	x: number;
-	y: number;
-}
-
-export interface LockedLayout {
-	locked: boolean;
-	positions: Record<string, SavedPosition>;
-}
-
-export interface PositionStore {
-	get(blockId: string): LockedLayout | null;
-	set(blockId: string, layout: LockedLayout): Promise<void>;
-	clear(blockId: string): Promise<void>;
 }
 
 export const VIEW_TYPE_RELATIONS = "relations-graph";

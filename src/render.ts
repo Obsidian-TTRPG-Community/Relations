@@ -2,9 +2,9 @@ import { App, TFile, Menu } from "obsidian";
 import cytoscape, { Core, ElementDefinition, LayoutOptions } from "cytoscape";
 import fcose from "cytoscape-fcose";
 import dagre from "cytoscape-dagre";
-import { RelationsGraph, RelationsSettings, GraphEdge, RelationshipType } from "./types";
+import { RelationsGraph, RelationsSettings, GraphEdge, RelationshipType, EdgeLabelStore, edgeLabelKey } from "./types";
 import { applyGenerationLayout } from "./family-tree";
-import { drawFamilyConnectors } from "./family-connectors";
+import { drawFamilyConnectors, OverlayLabelHooks } from "./family-connectors";
 
 type Stylesheet = cytoscape.StylesheetStyle;
 
@@ -23,20 +23,31 @@ export interface RenderOptions {
 	graph: RelationsGraph;
 	highlightId?: string;
 	useTreeLayout?: boolean;
-	familyMode?: "graph" | "tree";
-	                            // Family view, active-note focused, generation-aligned.
-	                            // "graph": Cytoscape edges differentiated by relationship
-	                            //   type (marriage solid, informal partnership dotted,
-	                            //   parent→child arrowed) — the original graph-style view.
-	                            // "tree": orthogonal SVG connectors (vertical drops +
-	                            //   sibling distribution bars) for a true family-tree look.
+	familyTree?: boolean;       // classical chart: generation-aligned positioning +
+	                            // orthogonal SVG connector overlay (drops, sibling bars,
+	                            // dashed bars for co-parents without declared marriage).
+	                            // Spouse-lockstep drag enabled. If both familyTree and
+	                            // familyGraph are set, familyTree wins.
+	familyGraph?: boolean;      // graph-style family: generation-aligned positioning +
+	                            // Cytoscape edges differentiated by relationship type
+	                            // (marriage solid, informal partnership dotted,
+	                            // parent→child arrowed). Active-note focused.
 	interactive?: boolean;
 	compact?: boolean;
 	zoomMultiplier?: number;    // applied AFTER fit; >1 zooms in, <1 zooms out. Default 1.
 	showLabels?: boolean;       // show the note name under each node. Defaults to the
 	                            // showNodeLabels setting; a code-block can override it.
-	spacing?: number;           // family-graph spacing multiplier (0.2–3.0)
-	presetPositions?: Record<string, { x: number; y: number }>;  // locked layout positions
+	spacing?: number;           // family view only: multiplier on node spacing. <1 tightens
+	                            // (good for infoboxes), >1 loosens. Defaults to compact-aware value.
+	presetPositions?: Record<string, { x: number; y: number }>;
+	                            // when provided, nodes are placed at these saved coordinates and
+	                            // the auto-layout is skipped (locked-layout restore). Nodes not in
+	                            // the map fall back to the computed layout.
+	labelStore?: EdgeLabelStore | null;
+	                            // when provided, edge labels are loaded from and saved to this
+	                            // store. Double-clicking an edge opens an inline editor.
+	editableLabels?: boolean;   // gate the double-click editor. Defaults to false. Set true in
+	                            // contexts with enough room (non-mini embeds, side panel).
 }
 
 interface ThemeColors {
@@ -142,7 +153,14 @@ function measureLabelWidths(
 
 export function renderGraph(opts: RenderOptions): Core {
 	ensureExtensions();
-	const { app, settings, container, graph, highlightId, useTreeLayout, compact, familyMode } = opts;
+	const { app, settings, container, graph, highlightId, useTreeLayout, compact } = opts;
+	// Family-tree wins over family-graph if both are set — applies the conflict-
+	// resolution rule defensively in case a caller bypassed the codeblock parser.
+	const familyTree = !!opts.familyTree;
+	const familyGraph = !!opts.familyGraph && !familyTree;
+	// Common predicate: either mode triggers the generation layout, the family
+	// neighbourhood, and the edge filtering described in the block below.
+	const isFamilyView = familyTree || familyGraph;
 	// Label visibility: explicit per-call override wins, else fall back to the
 	// global setting (default true for back-compat with vaults predating this option).
 	const showLabels = opts.showLabels ?? settings.showNodeLabels ?? true;
@@ -157,38 +175,113 @@ export function renderGraph(opts: RenderOptions): Core {
 
 	// Edge filtering and synthesis varies by mode:
 	//
-	// Family modes (graph + tree): keep only genealogy + pair edges (same as the
-	//   side-panel filters), AND synthesize "informal partnership" edges between
-	//   any two people who share a child but have no declared pair edge between
-	//   them. Without this synthesis, an unmarried couple's relationship is only
-	//   readable by tracing two arrows down to a shared kid — an explicit dotted
-	//   line between them makes it instantly visible. Both family modes filter and
-	//   synthesize identically; they differ only in how connectors are drawn.
+	// Either family mode: keep only genealogy + pair edges (same filter the
+	//   side-panel applies internally). Invert genealogy edges to point
+	//   parent→child for natural top-down reading. Also detect "informal
+	//   partnerships" — pairs of people who share a child but have no declared
+	//   pair edge between them — and capture them as a list.
+	//
+	// familyGraph (graph-style) additionally synthesizes dotted Cytoscape edges
+	//   for each informal partnership, so the relationship is visually explicit
+	//   in the curved-edge view.
+	//
+	// familyTree (classical chart) does NOT synthesize Cytoscape edges for
+	//   informal partnerships — the connector overlay will draw a dashed
+	//   horizontal bar between such co-parents directly, which is the
+	//   classical-chart convention. Cytoscape edges would just visually
+	//   compete with the overlay.
 	//
 	// Other modes: pass the graph through unchanged.
 	let effectiveGraph: RelationsGraph;
-	if (familyMode) {
+	let informalPartnerships: Array<[string, string]> = [];
+	if (isFamilyView) {
 		const filteredRaw = graph.edges.filter((e) => e.genealogy || e.pair);
 
 		// Genealogy edges in our data go child→parent (the child's note declares
-		// its parents in frontmatter). For the family-graph view we invert these
-		// so arrows visually run parent→child, which is how genealogy charts are
+		// its parents in frontmatter). For family views we invert these so arrows
+		// visually run parent→child, which is how genealogy charts are
 		// conventionally read. Pair edges stay as-is — they're symmetric anyway.
 		const filtered: GraphEdge[] = filteredRaw.map((e) => {
 			if (!e.genealogy) return e;
 			return { ...e, source: e.target, target: e.source };
 		});
 
-		// Synthesize "informal partnership" edges between co-parents with no
-		// declared pair edge. Extracted so the legend builder can detect the same
-		// condition without duplicating the logic (see synthesizeInformalPartnerships).
-		const synthesized = synthesizeInformalPartnerships(graph);
+		// Find shared-children co-parents that aren't already in a pair edge.
+		// Walk genealogy edges (now parent->child after inversion) and group by
+		// child id (= edge.target).
+		const parentSets = new Map<string, string[]>();
+		for (const e of filtered) {
+			if (!e.genealogy) continue;
+			if (!parentSets.has(e.target)) parentSets.set(e.target, []);
+			parentSets.get(e.target)!.push(e.source);
+		}
+		const declaredPairs = new Set<string>();
+		for (const e of filtered) {
+			if (!e.pair) continue;
+			declaredPairs.add(pairKey(e.source, e.target));
+		}
+		// For each child with 2+ parents, record pair of co-parents who don't
+		// already have a declared partnership.
+		const informalKeys = new Set<string>();
+		for (const parents of parentSets.values()) {
+			for (let i = 0; i < parents.length; i++) {
+				for (let j = i + 1; j < parents.length; j++) {
+					const a = parents[i];
+					const b = parents[j];
+					const k = pairKey(a, b);
+					if (declaredPairs.has(k)) continue;
+					if (informalKeys.has(k)) continue;
+					informalKeys.add(k);
+					informalPartnerships.push([a, b]);
+				}
+			}
+		}
+
+		// In family-graph mode, materialize these as synthetic dotted Cytoscape
+		// edges so the curved-edge view shows the relationship explicitly.
+		// Family-tree mode skips this step — the connector overlay draws a
+		// dashed bar instead, which is the classical-chart convention.
+		const synthesized: GraphEdge[] = [];
+		if (familyGraph) {
+			for (const [a, b] of informalPartnerships) {
+				synthesized.push({
+					source: a,
+					target: b,
+					type: "__informal_partnership",  // synthetic; not a real configured type
+					color: "#888888",                  // muted grey to read as "implied, not declared"
+					symmetric: true,
+					pair: true,
+					lineStyle: "dotted",
+					genealogy: false,
+				});
+			}
+		}
 		effectiveGraph = { nodes: graph.nodes, edges: [...filtered, ...synthesized] };
 	} else {
 		effectiveGraph = graph;
 	}
 
-	const elements = toCytoscape(effectiveGraph, highlightId);
+	// Resolve a relationship type's symmetry flag from settings, falling back to
+	// the edge's own flag and finally true (most relationship types are symmetric).
+	// Used both for label key derivation and for whether the dbl-click editor
+	// canonicalises the key direction.
+	const typeIsSymmetric = (e: GraphEdge): boolean => {
+		const t = settings.relationshipTypes.find((rt) => rt.name === e.type);
+		if (t) return t.symmetric;
+		return e.symmetric ?? true;
+	};
+
+	// Lookup function for user-supplied edge labels. Synthetic edges (the dotted
+	// informal-partnership lines in family-graph mode) don't get user labels —
+	// the partnership itself is inferred, so there's no "real" edge to label.
+	const labelStore = opts.labelStore ?? null;
+	const lookupLabel = (e: GraphEdge): string => {
+		if (!labelStore) return "";
+		if (e.type === "__informal_partnership") return "";
+		return labelStore.getLabel(edgeLabelKey(e.source, e.type, e.target, typeIsSymmetric(e))) ?? "";
+	};
+
+	const elements = toCytoscape(effectiveGraph, highlightId, lookupLabel);
 	const theme = resolveTheme(container);
 
 	// Measure node label widths up-front so layouts can space nodes proportionally
@@ -209,18 +302,23 @@ export function renderGraph(opts: RenderOptions): Core {
 		}
 	}
 
-	// Pick the layout. Two cases:
+	// Pick the layout. Three cases:
 	//
-	// Family modes: skip layout (preset placeholder). Positions are computed by
-	//   applyGenerationLayout after init — generation-aligned rows with parents
-	//   above, partners on the same row, children below. Tree mode then overlays
-	//   orthogonal SVG connectors; graph mode keeps Cytoscape's own type-
-	//   differentiated edges (solid for marriage, dotted for informal, arrowed
-	//   for genealogy).
+	// presetPositions (locked layout): skip all auto-layout. We place nodes at the
+	//   saved coordinates after init (below). A "preset" placeholder layout avoids
+	//   running anything that would move them.
+	//
+	// Either family mode (familyTree or familyGraph): skip layout (preset
+	//   placeholder). Positions are computed by applyGenerationLayout after init —
+	//   generation-aligned rows with parents above, partners on the same row,
+	//   children below.
+	//   - familyGraph draws Cytoscape edges with type differentiation.
+	//   - familyTree hides Cytoscape genealogy edges and draws an orthogonal
+	//     SVG connector overlay (drawFamilyConnectors, below).
 	//
 	// Otherwise: standard pickLayout.
 	const hasPresets = !!opts.presetPositions && Object.keys(opts.presetPositions).length > 0;
-	const initialLayout = (familyMode || hasPresets)
+	const initialLayout = (isFamilyView || hasPresets)
 		? ({ name: "preset" } as cytoscape.LayoutOptions)
 		: pickLayout(settings, useTreeLayout, effectiveGraph, !!compact, labelWidths);
 
@@ -246,42 +344,117 @@ export function renderGraph(opts: RenderOptions): Core {
 	});
 
 	if (hasPresets) {
-		const preset = opts.presetPositions!;
-		const missing: string[] = [];
+		// Locked layout: place each node at its saved position. Nodes without a
+		// saved position (e.g. added since the lock) fall back to the family
+		// layout if applicable, else stay where preset put them (origin) — better
+		// than running a full layout that would move the locked nodes too.
+		const presets = opts.presetPositions!;
+		const unplaced: string[] = [];
 		cy.nodes().forEach((node) => {
-			const saved = preset[node.id()];
-			if (saved) {
-				node.position({ x: saved.x, y: saved.y });
+			const p = presets[node.id()];
+			if (p) {
+				node.position({ x: p.x, y: p.y });
 			} else {
-				missing.push(node.id());
+				unplaced.push(node.id());
 			}
 		});
-		if (missing.length > 0 && familyMode) {
+		// If some nodes are new since the lock and this is a family view, run the
+		// generation layout but then re-pin the saved ones so they don't drift.
+		if (unplaced.length > 0 && isFamilyView) {
 			const spacing = opts.spacing ?? (compact ? 0.55 : 1);
 			applyGenerationLayout(cy, graph, { spacing });
 			cy.nodes().forEach((node) => {
-				const saved = preset[node.id()];
-				if (saved) node.position({ x: saved.x, y: saved.y });
+				const p = presets[node.id()];
+				if (p) node.position({ x: p.x, y: p.y });
 			});
-		} else if (missing.length > 0) {
-			const xs = Object.values(preset).map((p) => p.x);
-			const ys = Object.values(preset).map((p) => p.y);
-			const startX = xs.length ? Math.max(...xs) + 120 : 0;
-			const startY = ys.length ? Math.min(...ys) : 0;
-			missing.forEach((id, idx) => {
-				cy.getElementById(id).position({ x: startX, y: startY + idx * 80 });
+		} else if (unplaced.length > 0) {
+			// Non-family locked graph with new nodes added since the lock. Rather
+			// than leaving them all stacked at the origin, spread them in a column
+			// to the right of the saved cluster so they're individually grabbable.
+			const savedXs = Object.values(presets).map((p) => p.x);
+			const savedYs = Object.values(presets).map((p) => p.y);
+			const rightEdge = savedXs.length ? Math.max(...savedXs) + 120 : 0;
+			const topEdge = savedYs.length ? Math.min(...savedYs) : 0;
+			unplaced.forEach((id, i) => {
+				cy.getElementById(id).position({ x: rightEdge, y: topEdge + i * 80 });
 			});
 		}
-	} else if (familyMode) {
+	} else if (isFamilyView) {
+		// Compute generation-aligned positions. Pass the original `graph` (with
+		// genealogy/pair edges intact) since the algorithm needs them to figure
+		// out family structure — `effectiveGraph` already had its edges replaced
+		// with our inverted/synthesized version which is for rendering, not for
+		// structural reasoning.
+		//
+		// Spacing: explicit override wins; otherwise default to a tighter value
+		// in compact (infobox/mini) embeds so the tree doesn't get fit-zoomed
+		// down to tiny nodes with long edges in a small viewport. 0.55 was chosen
+		// so a 3-generation tree fills a typical infobox without clipping.
 		const spacing = opts.spacing ?? (compact ? 0.55 : 1);
 		applyGenerationLayout(cy, graph, { spacing });
 	}
 
-	// Tree mode only: replace Cytoscape's bezier genealogy edges with orthogonal
-	// SVG connectors for the classic family-tree look. Graph mode keeps the
-	// Cytoscape edges (arrowed parent→child, relationship-typed line styles).
-	if (familyMode === "tree") {
-		drawFamilyConnectors(cy, graph, container, !!compact);
+	// Family-tree mode: draw the orthogonal SVG connector overlay on top of (and
+	// replacing) Cytoscape's bezier genealogy edges, and include dashed bars for
+	// informal partnerships (co-parents who share a child but have no declared
+	// marriage between them). Runs for both fresh layouts and locked preset
+	// layouts so the classical chart visual is consistent either way.
+	if (familyTree) {
+		// Wire label hooks so the overlay can read existing labels (for display)
+		// and open the editor when a stem/bar is double-clicked.
+		//
+		// Genealogy edges in the raw graph go child→parent (the child's note
+		// declares its parents in frontmatter). We use the type from one such
+		// edge as the key's `type` argument — typically `parent`, but the user
+		// can rename it. Genealogy edges are asymmetric, so the key direction
+		// is preserved as child→parent — same as what label-saves from any other
+		// view would produce.
+		const genType = graph.edges.find((e) => e.genealogy)?.type ?? "parent";
+		const overlayHooks: OverlayLabelHooks | null = (labelStore && opts.editableLabels) ? {
+			getGenealogyLabel: (child, parent) =>
+				labelStore.getLabel(edgeLabelKey(child, genType, parent, false)) ?? "",
+			getInformalLabel: (a, b) =>
+				// Informal partnerships are inferred (no real edge in the graph), so
+				// they don't have a relationship-type with a configurable symmetric
+				// flag. They ARE symmetric by nature (A is B's co-parent iff B is
+				// A's), so we canonicalise direction in the key.
+				labelStore.getLabel(edgeLabelKey(a, "__informal_partnership", b, true)) ?? "",
+			editGenealogyLabel: (child, parent, clientX, clientY) => {
+				openEdgeLabelEditor({
+					container,
+					clientX,
+					clientY,
+					current: labelStore.getLabel(edgeLabelKey(child, genType, parent, false)) ?? "",
+					placeholder: 'e.g. "estranged", "adopted"',
+					onSave: async (value) => {
+						await labelStore.setLabel(edgeLabelKey(child, genType, parent, false), value);
+						// Trigger a redraw so the new label appears. The overlay's
+						// onPositionChange handler isn't enough — no node moved.
+						// Easiest path: emit a faux position event by re-positioning
+						// one node to its current spot, which forces redraw via rAF.
+						const anyNode = cy.nodes()[0];
+						if (anyNode) anyNode.position(anyNode.position());
+					},
+				});
+			},
+			editInformalLabel: (a, b, clientX, clientY) => {
+				const key = edgeLabelKey(a, "__informal_partnership", b, true);
+				openEdgeLabelEditor({
+					container,
+					clientX,
+					clientY,
+					current: labelStore.getLabel(key) ?? "",
+					placeholder: 'e.g. "brief affair"',
+					onSave: async (value) => {
+						await labelStore.setLabel(key, value);
+						const anyNode = cy.nodes()[0];
+						if (anyNode) anyNode.position(anyNode.position());
+					},
+				});
+			},
+		} : null;
+
+		drawFamilyConnectors(cy, graph, container, !!compact, informalPartnerships, overlayHooks);
 	}
 
 	// Apply per-node image styles after init. We do this here (not in the stylesheet
@@ -390,6 +563,40 @@ export function renderGraph(opts: RenderOptions): Core {
 		menu.showAtMouseEvent(orig);
 	});
 
+	// Double-click on an edge → open inline label editor. Gated by editableLabels
+	// (off in mini embeds where there's no room for an input). Synthetic edges
+	// (informal-partnership in family-graph mode) are skipped — they don't carry
+	// canonical relationships, so a label on them would be confusing.
+	if (opts.editableLabels && labelStore) {
+		cy.on("dblclick", "edge", (evt) => {
+			const edge = evt.target;
+			const type = edge.data("type") as string;
+			if (type === "__informal_partnership") return;
+			const source = edge.data("source") as string;
+			const target = edge.data("target") as string;
+			const symmetric = edge.data("symmetric") === "true";
+			const key = edgeLabelKey(source, type, source === target ? target : target, symmetric);
+			const current = labelStore.getLabel(key) ?? "";
+
+			const orig = evt.originalEvent as MouseEvent;
+			openEdgeLabelEditor({
+				container,
+				clientX: orig.clientX,
+				clientY: orig.clientY,
+				current,
+				placeholder: 'e.g. "hates them 75%"',
+				onSave: async (value) => {
+					await labelStore.setLabel(key, value);
+					edge.data("userLabel", value);
+					// Toggle the has-label class so the stylesheet picks up the
+					// presence/absence of the label.
+					if (value) edge.addClass("has-label");
+					else edge.removeClass("has-label");
+				},
+			});
+		});
+	}
+
 	return cy;
 }
 
@@ -411,7 +618,75 @@ function findScrollParent(el: HTMLElement): HTMLElement | Window {
 	return window;
 }
 
-function toCytoscape(graph: RelationsGraph, highlightId?: string): ElementDefinition[] {
+/**
+ * Open a small floating text input near the given client coordinates so the
+ * user can type a short inline label for the edge they double-clicked. Saved
+ * on Enter or blur; cancelled with Escape. The input absolutely-positions
+ * itself inside the same container so it scrolls/resizes with the embed.
+ */
+function openEdgeLabelEditor(opts: {
+	container: HTMLElement;
+	clientX: number;
+	clientY: number;
+	current: string;
+	placeholder: string;
+	onSave: (value: string) => Promise<void> | void;
+}): void {
+	// Remove any prior editor before opening a new one — defensive in case a
+	// double-click fires while one's already open.
+	opts.container.querySelectorAll(".relations-edge-label-editor").forEach((el) => el.remove());
+
+	const containerRect = opts.container.getBoundingClientRect();
+	const input = document.createElement("input");
+	input.type = "text";
+	input.className = "relations-edge-label-editor";
+	input.value = opts.current;
+	input.placeholder = opts.placeholder;
+	input.maxLength = 80;
+	input.style.position = "absolute";
+	input.style.left = `${opts.clientX - containerRect.left}px`;
+	input.style.top = `${opts.clientY - containerRect.top}px`;
+	input.style.transform = "translate(-50%, -50%)";
+
+	let committed = false;
+	const commit = async () => {
+		if (committed) return;
+		committed = true;
+		try {
+			await opts.onSave(input.value);
+		} finally {
+			input.remove();
+		}
+	};
+	const cancel = () => {
+		if (committed) return;
+		committed = true;
+		input.remove();
+	};
+
+	input.addEventListener("keydown", (e) => {
+		if (e.key === "Enter") {
+			e.preventDefault();
+			void commit();
+		} else if (e.key === "Escape") {
+			e.preventDefault();
+			cancel();
+		}
+		// Stop Obsidian's global hotkeys from firing while typing.
+		e.stopPropagation();
+	});
+	input.addEventListener("blur", () => { void commit(); });
+
+	opts.container.appendChild(input);
+	input.focus();
+	input.select();
+}
+
+function toCytoscape(
+	graph: RelationsGraph,
+	highlightId?: string,
+	lookupLabel?: (e: GraphEdge) => string,
+): ElementDefinition[] {
 	const out: ElementDefinition[] = [];
 	for (const n of graph.nodes) {
 		out.push({
@@ -428,9 +703,12 @@ function toCytoscape(graph: RelationsGraph, highlightId?: string): ElementDefini
 		const classes: string[] = [];
 		if (e.pair) classes.push("pair");
 		if (e.genealogy) classes.push("genealogy");
+		// Apply a class for any non-solid line style. Solid is the default.
 		if (e.lineStyle && e.lineStyle !== "solid") {
 			classes.push(`ls-${e.lineStyle}`);
 		}
+		const userLabel = lookupLabel ? lookupLabel(e) : "";
+		if (userLabel) classes.push("has-label");
 		out.push({
 			data: {
 				id: `${e.source}__${e.type}__${e.target}`,
@@ -441,6 +719,11 @@ function toCytoscape(graph: RelationsGraph, highlightId?: string): ElementDefini
 				directed: e.symmetric ? "false" : "true",
 				pair: e.pair ? "true" : "false",
 				lineStyle: e.lineStyle ?? "solid",
+				// userLabel is the inline label the user typed via double-click. Stored
+				// in plugin data and looked up at render time. Empty string means no
+				// label (Cytoscape renders nothing for empty labels).
+				userLabel: userLabel,
+				symmetric: e.symmetric ? "true" : "false",
 			},
 			classes: classes.join(" "),
 		});
@@ -513,6 +796,26 @@ function buildStyle(theme: ThemeColors, compact: boolean, showLabels: boolean): 
 				"line-style": "solid",
 				"curve-style": "bezier",
 				"opacity": 0.85,
+			},
+		},
+		{
+			// User-supplied inline edge label (set via double-click). Empty userLabel
+			// means no label is drawn — Cytoscape renders nothing for an empty string.
+			selector: "edge.has-label",
+			style: {
+				"label": "data(userLabel)",
+				"font-size": compact ? 9 : 11,
+				"font-weight": 500,
+				"color": theme.textNormal,
+				"text-background-color": theme.bgPrimary,
+				"text-background-opacity": 0.85,
+				"text-background-padding": "2px",
+				"text-background-shape": "roundrectangle",
+				"text-border-color": theme.bgModBorder,
+				"text-border-width": 1,
+				"text-border-opacity": 0.6,
+				"text-rotation": "autorotate",
+				"text-events": "yes",
 			},
 		},
 		{
@@ -668,15 +971,12 @@ function pairKey(a: string, b: string): string {
 	return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-/** Synthetic edge type tag for informal-partnership connectors (not a configured type). */
-export const INFORMAL_PARTNERSHIP_TYPE = "__informal_partnership";
-
 /**
- * Legend representation of the synthesized informal-partnership line. Family-graph
- * mode draws a dotted grey connector between co-parents who share a child but have
- * no declared spouse/pair edge; since it isn't one of the user's configured
- * relationship types it would otherwise be absent from the legend. `pair` is false
- * here so the legend label omits the ⚭ marriage glyph — this is the unmarried case.
+ * Synthetic `RelationshipType` entry used to surface "informal partnership"
+ * in the legend strip when one or more inferred co-parent relationships are
+ * present. This isn't a real configured relationship type — it never appears
+ * in settings, and users can't declare it directly. It exists so the legend
+ * can name the dotted/dashed line connecting unmarried co-parents.
  */
 export const INFORMAL_PARTNERSHIP_LEGEND: RelationshipType = {
 	name: "informal partnership",
@@ -689,14 +989,13 @@ export const INFORMAL_PARTNERSHIP_LEGEND: RelationshipType = {
 };
 
 /**
- * Compute the synthetic "informal partnership" edges for family-graph mode: a dotted
- * grey connector between each pair of co-parents (people sharing a child via genealogy
- * edges) who have no declared pair edge between them. Operates on the raw graph; safe
- * to call independently of rendering (the legend builder uses it to decide whether to
- * show the informal-partnership entry).
+ * Detect whether the given graph contains any "informal partnership" — pairs
+ * of people who share a child but have no declared marriage between them.
+ * Used by the codeblock renderer to decide whether to surface the synthetic
+ * legend entry; the rendering pipeline itself also computes this inline for
+ * use as overlay/synthesised-edge input.
  */
-export function synthesizeInformalPartnerships(graph: RelationsGraph): GraphEdge[] {
-	// Group parents by child. Raw genealogy edges run child→parent (source=child).
+export function hasInformalPartnership(graph: RelationsGraph): boolean {
 	const parentsByChild = new Map<string, string[]>();
 	for (const e of graph.edges) {
 		if (!e.genealogy) continue;
@@ -708,26 +1007,12 @@ export function synthesizeInformalPartnerships(graph: RelationsGraph): GraphEdge
 		if (!e.pair) continue;
 		declaredPairs.add(pairKey(e.source, e.target));
 	}
-	const synthesized: GraphEdge[] = [];
-	const seen = new Set<string>();
 	for (const parents of parentsByChild.values()) {
 		for (let i = 0; i < parents.length; i++) {
 			for (let j = i + 1; j < parents.length; j++) {
-				const k = pairKey(parents[i], parents[j]);
-				if (declaredPairs.has(k) || seen.has(k)) continue;
-				seen.add(k);
-				synthesized.push({
-					source: parents[i],
-					target: parents[j],
-					type: INFORMAL_PARTNERSHIP_TYPE,  // synthetic; not a real configured type
-					color: "#888888",                  // muted grey to read as "implied, not declared"
-					symmetric: true,
-					pair: true,
-					lineStyle: "dotted",
-					genealogy: false,
-				});
+				if (!declaredPairs.has(pairKey(parents[i], parents[j]))) return true;
 			}
 		}
 	}
-	return synthesized;
+	return false;
 }

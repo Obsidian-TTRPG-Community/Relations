@@ -170,6 +170,8 @@ export class RelationsView extends ItemView {
 			graph,
 			highlightId,
 			useTreeLayout: useTree,
+			labelStore: this.plugin,
+			editableLabels: true,
 		});
 
 		this.renderLegend();

@@ -4,18 +4,24 @@ import {
 	DEFAULT_SETTINGS,
 	VIEW_TYPE_RELATIONS,
 	RELATIONS_CODE_BLOCKS,
-	PositionStore,
 	LockedLayout,
+	PositionStore,
+	EdgeLabelStore,
 } from "./types";
 import { RelationsView } from "./view";
 import { RelationsSettingTab } from "./settings";
 import { processRelationsBlock } from "./codeblock";
 import { GraphCache } from "./graph-cache";
 
-export default class RelationsPlugin extends Plugin implements PositionStore {
+export default class RelationsPlugin extends Plugin implements PositionStore, EdgeLabelStore {
 	settings!: RelationsSettings;
 	graphCache: GraphCache = new GraphCache();
+	// Locked code-block layouts, keyed by the block's `id:` option. Persisted in
+	// data.json alongside settings. Populated in loadSettings.
 	private lockedLayouts: Record<string, LockedLayout> = {};
+	// Inline edge labels, keyed by `edgeLabelKey(source, type, target, symmetric)`.
+	// Persisted in data.json. Global across all blocks/views.
+	private edgeLabels: Record<string, string> = {};
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -83,7 +89,10 @@ export default class RelationsPlugin extends Plugin implements PositionStore {
 			this.registerMarkdownCodeBlockProcessor(
 				lang,
 				(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-					processRelationsBlock(this.app, this.settings, source, el, ctx, this.graphCache, this);
+					processRelationsBlock(this.app, this.settings, source, el, ctx, this.graphCache, {
+						positions: this,
+						labels: this,
+					});
 				},
 			);
 		}
@@ -106,10 +115,20 @@ export default class RelationsPlugin extends Plugin implements PositionStore {
 	onunload(): void { /* views detach automatically */ }
 
 	async loadSettings(): Promise<void> {
-		const loaded = await this.loadData();
-		this.lockedLayouts = loaded && typeof loaded.lockedLayouts === "object" && loaded.lockedLayouts || {};
+		const loaded = (await this.loadData()) as (Partial<RelationsSettings> & {
+			lockedLayouts?: Record<string, LockedLayout>;
+			edgeLabels?: Record<string, string>;
+		}) | null;
+		// Locked layouts and edge labels live under reserved keys in data.json,
+		// separate from the settings fields. Pull them out before settings get
+		// merged so they don't leak into the settings object (and vice versa).
+		this.lockedLayouts = (loaded && typeof loaded.lockedLayouts === "object" && loaded.lockedLayouts) || {};
+		this.edgeLabels = (loaded && typeof loaded.edgeLabels === "object" && loaded.edgeLabels) || {};
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
-		delete (this.settings as unknown as Record<string, unknown>).lockedLayouts;
+		// Strip reserved keys off the settings object so they don't get
+		// re-serialised in the wrong place or shown anywhere.
+		delete (this.settings as unknown as { lockedLayouts?: unknown }).lockedLayouts;
+		delete (this.settings as unknown as { edgeLabels?: unknown }).edgeLabels;
 		if (!Array.isArray(this.settings.relationshipTypes) || this.settings.relationshipTypes.length === 0) {
 			this.settings.relationshipTypes = DEFAULT_SETTINGS.relationshipTypes;
 		}
@@ -146,9 +165,16 @@ export default class RelationsPlugin extends Plugin implements PositionStore {
 		await this.persist();
 	}
 
+	/** Write settings + locked layouts + edge labels to data.json as one blob. */
 	private async persist(): Promise<void> {
-		await this.saveData({ ...this.settings, lockedLayouts: this.lockedLayouts });
+		await this.saveData({
+			...this.settings,
+			lockedLayouts: this.lockedLayouts,
+			edgeLabels: this.edgeLabels,
+		});
 	}
+
+	// ---- PositionStore implementation (used by code blocks to lock layouts) ----
 
 	get(blockId: string): LockedLayout | null {
 		return this.lockedLayouts[blockId] ?? null;
@@ -161,6 +187,27 @@ export default class RelationsPlugin extends Plugin implements PositionStore {
 
 	async clear(blockId: string): Promise<void> {
 		delete this.lockedLayouts[blockId];
+		await this.persist();
+	}
+
+	// ---- EdgeLabelStore implementation (inline labels on relationship lines) ----
+
+	getLabel(key: string): string | null {
+		return this.edgeLabels[key] ?? null;
+	}
+
+	async setLabel(key: string, label: string): Promise<void> {
+		const trimmed = label.trim();
+		if (trimmed) {
+			this.edgeLabels[key] = trimmed;
+		} else {
+			delete this.edgeLabels[key];
+		}
+		await this.persist();
+	}
+
+	async clearLabel(key: string): Promise<void> {
+		delete this.edgeLabels[key];
 		await this.persist();
 	}
 
