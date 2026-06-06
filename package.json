@@ -1,6 +1,6 @@
 {
   "name": "relations",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Visualise relationships between Obsidian notes",
   "main": "main.js",
   "scripts": {
@@ -8,13 +8,20 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "test": "vitest run"
   },
-  "keywords": ["obsidian", "plugin", "worldbuilding", "ttrpg", "fiction", "genealogy"],
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "worldbuilding",
+    "ttrpg",
+    "fiction",
+    "genealogy"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@typescript-eslint/eslint-plugin": "5.29.0",
-    "@typescript-eslint/parser": "5.29.0",
+    "@typescript-eslint/parser": "^5.29.0",
     "builtin-modules": "3.3.0",
     "esbuild": "0.25.0",
     "obsidian": "latest",
@@ -23,9 +30,9 @@
     "vitest": "^4.1.7"
   },
   "dependencies": {
+    "@types/cytoscape": "^3.21.0",
     "cytoscape": "^3.28.1",
-    "cytoscape-fcose": "^2.2.0",
     "cytoscape-dagre": "^2.5.0",
-    "@types/cytoscape": "^3.21.0"
+    "cytoscape-fcose": "^2.2.0"
   }
 }
