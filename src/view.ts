@@ -62,7 +62,7 @@ export class RelationsView extends ItemView {
 		});
 
 		const spacer = toolbar.createDiv({ cls: "relations-spacer" });
-		spacer.style.flex = "1";
+		// Spacer's flex:1 is in styles.css under .relations-spacer.
 
 		const refreshBtn = toolbar.createEl("button", { text: "Refresh" });
 		refreshBtn.addEventListener("click", () => this.render());

@@ -51,22 +51,16 @@ export function setupNodeBadges(
 	if (!overlay) {
 		overlay = document.createElement("div");
 		overlay.className = "relations-node-badges";
-		Object.assign(overlay.style, {
-			position: "absolute",
-			inset: "0",
-			pointerEvents: "none",
-			// Above the canvas (z-index 0) but below the family-connectors
-			// SVG overlay (which renders link labels users can click).
-			zIndex: "5",
-			overflow: "hidden",
-		});
+		// Layout, positioning, z-index, pointer-events, overflow all live in
+		// styles.css under .relations-node-badges.
+
 		// Cytoscape's container needs to be positioned for our absolute
-		// overlay to land in the right coordinate space. If it's already
-		// positioned (the parent CSS handles this), getComputedStyle returns
-		// the right value; if not, we set it here defensively.
+		// overlay to land in the right coordinate space. We add a class
+		// that sets position: relative if the container isn't already
+		// positioned. The class is idempotent — adding twice is safe.
 		const cs = window.getComputedStyle(container);
 		if (cs.position === "static") {
-			container.style.position = "relative";
+			container.classList.add("relations-cy-container");
 		}
 		container.appendChild(overlay);
 	}
@@ -87,14 +81,9 @@ export function setupNodeBadges(
 		if (existing) return existing;
 		const el = document.createElement("div");
 		el.className = "relations-node-badge-group";
-		Object.assign(el.style, {
-			position: "absolute",
-			pointerEvents: "none",
-			// We position each child relative to the group; the group itself
-			// sits at the node's centre in screen coordinates.
-			left: "0",
-			top: "0",
-		});
+		// Group's position/pointer-events/initial left+top live in styles.css
+		// under .relations-node-badge-group. Per-frame left/top are set
+		// dynamically via template-literal assignments in positionGroup().
 
 		const tl = makeBadgeSpan("top-left");
 		const tr = makeBadgeSpan("top-right");
@@ -198,47 +187,19 @@ interface BadgeGroup {
 function makeBadgeSpan(corner: "top-left" | "top-right"): HTMLSpanElement {
 	const el = document.createElement("span");
 	el.className = `relations-node-badge relations-node-badge-${corner}`;
-	Object.assign(el.style, {
-		position: "absolute",
-		// Lift each badge into a small pill so it reads cleanly against the
-		// portrait or background. Sized to comfortably hold an emoji or a
-		// short abbreviation.
-		display: "inline-block",
-		fontSize: "14px",
-		lineHeight: "1",
-		padding: "2px 4px",
-		borderRadius: "8px",
-		// Use a subtle background pill so the badge is legible against any
-		// node colour. var() picks up Obsidian's theme variables — works in
-		// light and dark themes without manual tweaking.
-		background: "var(--background-primary, #ffffff)",
-		border: "1px solid var(--background-modifier-border, #888)",
-		color: "var(--text-normal, #000)",
-		whiteSpace: "nowrap",
-		// Hidden until first redraw assigns content.
-		visibility: "visible",
-	});
+	// All static styling (position, padding, border, font, colors,
+	// transform-origin per corner) lives in styles.css under
+	// .relations-node-badge and .relations-node-badge-top-left /
+	// .relations-node-badge-top-right.
 	return el;
 }
 
 function makeSubtextSpan(): HTMLSpanElement {
 	const el = document.createElement("span");
 	el.className = "relations-node-badge relations-node-subtext";
-	Object.assign(el.style, {
-		position: "absolute",
-		display: "block",
-		fontSize: "11px",
-		fontStyle: "italic",
-		lineHeight: "1.2",
-		padding: "2px 6px",
-		borderRadius: "4px",
-		background: "var(--background-primary, #ffffff)",
-		color: "var(--text-muted, #888)",
-		whiteSpace: "nowrap",
-		// Position, centering, and zoom-scale are set in positionGroup() at
-		// redraw time — we set `transform` there so we can combine the
-		// horizontal centering with the per-frame zoom scale in one transform.
-	});
+	// Static styling lives in styles.css under .relations-node-subtext.
+	// Per-frame left/top/transform are set in positionGroup() via template-
+	// literal assignments which the static-styles lint rule permits.
 	return el;
 }
 
@@ -293,34 +254,29 @@ function positionGroup(group: BadgeGroup, node: NodeSingular, zoom: number): voi
 
 	// Top-left icon: positioned via `right`/`bottom` so its bottom-right
 	// corner sits at (-ringX, -ringY) from group origin — exactly on the
-	// ring at the top-left diagonal. transform-origin at 100% 100% means
-	// scale() expands upward-and-leftward away from that anchor, so the
-	// badge body grows outside the node as it scales up.
-	group.tl.style.left = "auto";
-	group.tl.style.top = "auto";
+	// ring at the top-left diagonal. transform-origin (100% 100%) and the
+	// `left: auto; top: auto` overrides come from the CSS class
+	// .relations-node-badge-top-left.
 	group.tl.style.right = `${ringX}px`;
 	group.tl.style.bottom = `${ringY}px`;
-	group.tl.style.transformOrigin = "100% 100%";
 	group.tl.style.transform = `scale(${zoom})`;
 
 	// Top-right icon: mirror — bottom-LEFT corner sits at (ringX, -ringY).
-	group.tr.style.right = "auto";
-	group.tr.style.top = "auto";
+	// transform-origin (0% 100%) and `right: auto; top: auto` overrides come
+	// from .relations-node-badge-top-right.
 	group.tr.style.left = `${ringX}px`;
 	group.tr.style.bottom = `${ringY}px`;
-	group.tr.style.transformOrigin = "0% 100%";
 	group.tr.style.transform = `scale(${zoom})`;
 
 	// Subtext: centred horizontally beneath the node. Positioned via the
 	// bottom of the bounding box (halfH below centre) plus a gap that
 	// scales with zoom. The 24px clears the Cytoscape label pill that
-	// renders the note name. transform-origin at 50% 0% keeps the
-	// top-centre anchored when scale changes — text grows downward and
-	// outward symmetrically. translateX(-50%) centres horizontally
-	// after scaling.
+	// renders the note name. transform-origin (50% 0%) lives in the CSS
+	// class so static-styles lint is happy; translateX(-50%) centres
+	// horizontally after scaling and is combined with the per-frame
+	// scale in one transform here.
 	const subGap = 24 * zoom;
 	group.sub.style.left = `0px`;
 	group.sub.style.top = `${halfH + subGap}px`;
-	group.sub.style.transformOrigin = "50% 0%";
 	group.sub.style.transform = `translateX(-50%) scale(${zoom})`;
 }

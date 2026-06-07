@@ -43,7 +43,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Relations" });
+		new Setting(containerEl).setName("Relations").setHeading();
 
 		new Setting(containerEl)
 			.setName("Portrait property")
@@ -142,7 +142,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 					this.plugin.refreshGraphView();
 				}));
 
-		containerEl.createEl("h3", { text: "Relationship types" });
+		new Setting(containerEl).setName("Relationship types").setHeading();
 		const help = containerEl.createDiv({ cls: "setting-item-description" });
 		help.innerHTML = `
 			<p>Each row is one relationship type, matched by frontmatter property name.</p>
@@ -182,7 +182,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 		// outer ring on each node based on a single frontmatter property.
 		// Whole section is optional: leave the property name blank to disable.
 		// -----------------------------------------------------------------
-		containerEl.createEl("h3", { text: "Ring color" });
+		new Setting(containerEl).setName("Ring color").setHeading();
 		const ringHelp = containerEl.createDiv({ cls: "setting-item-description" });
 		ringHelp.innerHTML = `
 			<p>Color the outer ring of a node based on a frontmatter property. Set a property name,
@@ -231,7 +231,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 		// Each slot is independently optional: leave a property name blank
 		// to disable that slot.
 		// -----------------------------------------------------------------
-		containerEl.createEl("h3", { text: "Node badges" });
+		new Setting(containerEl).setName("Node badges").setHeading();
 		const badgeHelp = containerEl.createDiv({ cls: "setting-item-description" });
 		badgeHelp.innerHTML = `
 			<p>Show small badges around each node, driven by frontmatter properties. Each slot
@@ -281,7 +281,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 					this.plugin.refreshGraphView();
 				}));
 
-		containerEl.createEl("h3", { text: "Code block syntax" });
+		new Setting(containerEl).setName("Code block syntax").setHeading();
 		const usage = containerEl.createEl("pre", { cls: "relations-help-pre" });
 		usage.setText(
 			"```relations\n" +

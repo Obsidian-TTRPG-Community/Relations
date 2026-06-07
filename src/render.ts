@@ -72,8 +72,8 @@ interface ThemeColors {
  */
 function readColor(host: HTMLElement, varName: string, fallback: string): string {
 	const probe = document.createElement("div");
+	probe.className = "relations-color-probe";
 	probe.style.color = `var(${varName}, ${fallback})`;
-	probe.style.display = "none";
 	host.appendChild(probe);
 	let resolved = "";
 	try {
@@ -124,14 +124,11 @@ function measureLabelWidths(
 	const fontSize = compact ? 10 : 13;
 
 	const probe = host.ownerDocument.createElement("span");
-	probe.style.position = "absolute";
-	probe.style.visibility = "hidden";
-	probe.style.left = "-99999px";
-	probe.style.top = "0";
-	probe.style.whiteSpace = "nowrap";
+	probe.className = "relations-label-probe";
 	probe.style.fontSize = `${fontSize}px`;
-	probe.style.fontWeight = "500";
 	// fontFamily inherits from host — same as what Cytoscape will use to render.
+	// Other probe styles (position, visibility, off-screen left, white-space,
+	// font-weight) live in styles.css under .relations-label-probe.
 	host.appendChild(probe);
 
 	try {
@@ -541,10 +538,11 @@ function openEdgeLabelEditor(opts: {
 	input.value = opts.current;
 	input.placeholder = opts.placeholder;
 	input.maxLength = 80;
-	input.style.position = "absolute";
+	// position: absolute and transform: translate(-50%, -50%) come from the
+	// CSS class. Dynamic left/top below are template-literal assignments,
+	// which the no-static-styles-assignment rule permits.
 	input.style.left = `${opts.clientX - containerRect.left}px`;
 	input.style.top = `${opts.clientY - containerRect.top}px`;
-	input.style.transform = "translate(-50%, -50%)";
 
 	let committed = false;
 	const commit = async () => {

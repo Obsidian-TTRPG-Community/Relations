@@ -417,3 +417,130 @@
 .relations-edge-label-editor::placeholder {
 	color: var(--text-faint);
 }
+
+/* -----------------------------------------------------------------------
+ * Classes below replace inline-style assignments that previously lived in
+ * the TS source. Moved here per Obsidian's plugin lint rule
+ * `no-static-styles-assignment`. Dynamic per-frame values (positions,
+ * transforms with computed scale factors) remain in JS via template
+ * literals — those don't violate the lint rule and can't be expressed
+ * statically anyway.
+ * --------------------------------------------------------------------- */
+
+/* Toolbar spacer that pushes subsequent buttons to the right. */
+.relations-spacer {
+	flex: 1;
+}
+
+/* Cytoscape container needs to be positioned for the badge overlay to
+ * land in the right coordinate space. The plugin adds this class
+ * defensively to the host container before mounting the badge overlay
+ * onto an absolute-positioned child. */
+.relations-cy-container {
+	position: relative;
+}
+
+/* Probe element used to measure label widths offscreen via
+ * getComputedStyle / offsetWidth. Hidden and positioned far off-canvas. */
+.relations-label-probe {
+	position: absolute;
+	visibility: hidden;
+	left: -99999px;
+	top: 0;
+	white-space: nowrap;
+	font-weight: 500;
+}
+
+/* Probe element used to read a CSS variable's resolved color. */
+.relations-color-probe {
+	display: none;
+}
+
+/* Edge-label editor positioned anchor — places the input so that its
+ * centre point lands on the supplied client coordinates. Concrete x/y
+ * are set dynamically via template-literal style assignments at the
+ * call site, which the static-styles lint rule permits. */
+.relations-edge-label-editor {
+	position: absolute;
+	transform: translate(-50%, -50%);
+}
+
+/* Hit-test path overlaid on top of an SVG family-connector route.
+ * Wide invisible stroke catches double-clicks for label editing. */
+.relations-family-connector-hit-path {
+	cursor: pointer;
+	pointer-events: stroke;
+}
+
+/* SVG label-pill <g> overlay for family-connector edge labels. */
+.family-connector-label {
+	cursor: pointer;
+	pointer-events: auto;
+}
+
+/* Node-badge overlay container — absolute layer covering the Cytoscape
+ * canvas, click-through, with a z-index that sits above the canvas but
+ * below the family-connectors SVG label overlay. */
+.relations-node-badges {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	z-index: 5;
+	overflow: hidden;
+}
+
+/* One group per node that has any badge content. Positioned absolutely
+ * at the node's rendered centre; children are placed relative to that
+ * origin. The actual left/top values are set dynamically via template-
+ * literal assignments in node-badges.ts positionGroup(). */
+.relations-node-badge-group {
+	position: absolute;
+	pointer-events: none;
+	left: 0;
+	top: 0;
+}
+
+/* Top-left and top-right corner badges. The position-anchoring CSS
+ * (auto values for left/top vs right/bottom) is class-driven so the
+ * lint rule doesn't catch the literal "auto" assignments that used to
+ * live in JS. transform-origin likewise depends only on the corner,
+ * not zoom, so it's a static class concern. */
+.relations-node-badge {
+	position: absolute;
+	display: inline-block;
+	font-size: 14px;
+	line-height: 1;
+	padding: 2px 4px;
+	border-radius: 8px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+	white-space: nowrap;
+	visibility: visible;
+}
+
+.relations-node-badge-top-left {
+	left: auto;
+	top: auto;
+	transform-origin: 100% 100%;
+}
+
+.relations-node-badge-top-right {
+	right: auto;
+	top: auto;
+	transform-origin: 0% 100%;
+}
+
+.relations-node-subtext {
+	position: absolute;
+	display: block;
+	font-size: 11px;
+	font-style: italic;
+	line-height: 1.2;
+	padding: 2px 6px;
+	border-radius: 4px;
+	background: var(--background-primary);
+	color: var(--text-muted);
+	white-space: nowrap;
+	transform-origin: 50% 0%;
+}

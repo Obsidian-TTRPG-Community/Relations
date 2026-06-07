@@ -336,8 +336,8 @@ function addTextLabel(
 ): void {
 	const group = document.createElementNS(SVG_NS, "g");
 	group.classList.add("family-connector-label");
-	group.style.cursor = "pointer";
-	group.style.pointerEvents = "auto";
+	// cursor: pointer and pointer-events: auto are in styles.css under
+	// .family-connector-label.
 
 	// SVG has no text-measurement API without a render pass, so we estimate
 	// width from character count. 0.6em per char is a reasonable average for
@@ -398,8 +398,9 @@ function addHitZone(
 	path.setAttribute("fill", "none");
 	path.setAttribute("stroke", "transparent");
 	path.setAttribute("stroke-width", "14");
-	path.style.cursor = "pointer";
-	path.style.pointerEvents = "stroke";  // only the stroke catches clicks, not the empty fill area
+	path.classList.add("relations-family-connector-hit-path");
+	// cursor: pointer and pointer-events: stroke (only the stroke catches
+	// clicks, not the empty fill area) come from the CSS class.
 	path.addEventListener("dblclick", (e) => {
 		e.preventDefault();
 		e.stopPropagation();
