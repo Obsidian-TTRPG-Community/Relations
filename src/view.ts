@@ -61,8 +61,10 @@ export class RelationsView extends ItemView {
 			}
 		});
 
-		const spacer = toolbar.createDiv({ cls: "relations-spacer" });
-		// Spacer's flex:1 is in styles.css under .relations-spacer.
+		// Toolbar spacer pushes subsequent buttons to the right. The element
+		// itself is what matters; we don't need a reference to it because its
+		// styling (flex: 1) is class-driven via styles.css under .relations-spacer.
+		toolbar.createDiv({ cls: "relations-spacer" });
 
 		const refreshBtn = toolbar.createEl("button", { text: "Refresh" });
 		refreshBtn.addEventListener("click", () => this.render());

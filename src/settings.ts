@@ -43,7 +43,9 @@ export class RelationsSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName("Relations").setHeading();
+		// Obsidian displays the plugin name as the panel header automatically,
+		// so we don't add a duplicate "Relations" heading here. The
+		// no-problematic-settings-headings lint rule explicitly flags this.
 
 		new Setting(containerEl)
 			.setName("Portrait property")
@@ -142,7 +144,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 					this.plugin.refreshGraphView();
 				}));
 
-		new Setting(containerEl).setName("Relationship types").setHeading();
+		new Setting(containerEl).setName("Connection types").setHeading();
 		const help = containerEl.createDiv({ cls: "setting-item-description" });
 		help.innerHTML = `
 			<p>Each row is one relationship type, matched by frontmatter property name.</p>
