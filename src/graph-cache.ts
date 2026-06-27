@@ -83,6 +83,8 @@ function hashSettings(s: RelationsSettings): string {
 		// invalidate the cache when frontmatter changes.
 		tlIcon: s.topLeftIconProperty,
 		trIcon: s.topRightIconProperty,
+		blIcon: s.bottomLeftIconProperty,
+		brIcon: s.bottomRightIconProperty,
 		subtext: s.subtextProperty,
 	});
 }

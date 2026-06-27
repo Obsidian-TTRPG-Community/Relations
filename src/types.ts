@@ -81,6 +81,8 @@ export interface RelationsSettings {
 	// also disappear, so "minimal portraits" mode stays minimal.
 	topLeftIconProperty: string;
 	topRightIconProperty: string;
+	bottomLeftIconProperty: string;
+	bottomRightIconProperty: string;
 	subtextProperty: string;
 }
 
@@ -121,6 +123,8 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 	ringColorRules: [],
 	topLeftIconProperty: "",
 	topRightIconProperty: "",
+	bottomLeftIconProperty: "",
+	bottomRightIconProperty: "",
 	subtextProperty: "",
 };
 
@@ -143,6 +147,8 @@ export interface GraphNode {
 	// draw, keeping the DOM minimal even on large vaults).
 	topLeftIcon?: string;
 	topRightIcon?: string;
+	bottomLeftIcon?: string;
+	bottomRightIcon?: string;
 	subtext?: string;
 }
 

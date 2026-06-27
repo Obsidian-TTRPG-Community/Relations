@@ -39,6 +39,8 @@ function makeSettings(
 		ringColorRules: rules,
 		topLeftIconProperty: "",
 		topRightIconProperty: "",
+		bottomLeftIconProperty: "",
+		bottomRightIconProperty: "",
 		subtextProperty: "",
 	};
 }

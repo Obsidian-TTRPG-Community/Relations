@@ -685,6 +685,18 @@
 	transform-origin: 0% 100%;
 }
 
+.relations-node-badge-bottom-left {
+	left: auto;
+	bottom: auto;
+	transform-origin: 100% 0%;
+}
+
+.relations-node-badge-bottom-right {
+	right: auto;
+	bottom: auto;
+	transform-origin: 0% 0%;
+}
+
 .relations-node-subtext {
 	position: absolute;
 	display: block;

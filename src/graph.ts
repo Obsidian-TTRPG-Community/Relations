@@ -408,6 +408,8 @@ function buildNode(
 	const ringColor = resolveRingColor(settings, fm);
 	const topLeftIcon = resolveFrontmatterString(fm, settings.topLeftIconProperty);
 	const topRightIcon = resolveFrontmatterString(fm, settings.topRightIconProperty);
+	const bottomLeftIcon = resolveFrontmatterString(fm, settings.bottomLeftIconProperty);
+	const bottomRightIcon = resolveFrontmatterString(fm, settings.bottomRightIconProperty);
 	const subtext = resolveFrontmatterString(fm, settings.subtextProperty);
 	const node: GraphNode = {
 		id: file.path,
@@ -418,6 +420,8 @@ function buildNode(
 	if (ringColor) node.ringColor = ringColor;
 	if (topLeftIcon) node.topLeftIcon = topLeftIcon;
 	if (topRightIcon) node.topRightIcon = topRightIcon;
+	if (bottomLeftIcon) node.bottomLeftIcon = bottomLeftIcon;
+	if (bottomRightIcon) node.bottomRightIcon = bottomRightIcon;
 	if (subtext) node.subtext = subtext;
 	return node;
 }

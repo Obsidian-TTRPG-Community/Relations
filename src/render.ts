@@ -628,6 +628,11 @@ function toCytoscape(
 		// by the overlay layer.
 		if (n.topLeftIcon) data.topLeftIcon = n.topLeftIcon;
 		if (n.topRightIcon) data.topRightIcon = n.topRightIcon;
+		if (n.bottomLeftIcon) data.bottomLeftIcon = n.bottomLeftIcon;
+		if (n.bottomRightIcon) data.bottomRightIcon = n.bottomRightIcon;
+		// Flag (string, for the Cytoscape attribute selector) used to push the
+		// name label lower when bottom-corner badges would otherwise overlap it.
+		if (n.bottomLeftIcon || n.bottomRightIcon) data.hasBottomBadge = "true";
 		if (n.subtext) data.subtext = n.subtext;
 		out.push({ data });
 	}
@@ -676,6 +681,10 @@ function buildStyle(theme: ThemeColors, compact: boolean, showLabels: boolean): 
 	const nodeSizeFocus   = compact ? 40 : 72;
 	const fontSize        = compact ? 10 : 13;
 	const labelMargin     = compact ? 4  : 8;
+	// When a node carries bottom-corner badges, those icons sit where the name
+	// label normally would, so the label is pushed down just enough to sit
+	// directly under the bottom edge of those icons.
+	const labelMarginBottomBadge = compact ? 14 : 16;
 	const labelPadding    = compact ? "2px" : "4px";
 
 	return [
@@ -705,6 +714,17 @@ function buildStyle(theme: ThemeColors, compact: boolean, showLabels: boolean): 
 				"border-width": 2,
 				"border-color": theme.bgModBorder,
 				"shape": "ellipse",
+			},
+		},
+		{
+			// Nodes with bottom-corner badges: drop the name label lower so it
+			// clears the bottom-left/bottom-right icons. The attribute selector
+			// is more specific than the base `node` rule, so it overrides
+			// text-margin-y only for nodes that actually have bottom badges —
+			// every other node keeps the tight default spacing.
+			selector: "node[hasBottomBadge = 'true']",
+			style: {
+				"text-margin-y": labelMarginBottomBadge,
 			},
 		},
 		// Per-note ring color override. Driven by frontmatter through the

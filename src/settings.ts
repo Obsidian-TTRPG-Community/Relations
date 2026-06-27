@@ -289,6 +289,32 @@ export class RelationsSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
+			.setName("Bottom-left icon property")
+			.setDesc("Frontmatter property whose value renders as a badge in the bottom-left corner. Leave blank to disable.")
+			.addText((t) => t
+				.setPlaceholder("e.g. status")
+				.setValue(this.plugin.settings.bottomLeftIconProperty)
+				.onChange(async (v) => {
+					this.plugin.settings.bottomLeftIconProperty = v.trim();
+					await this.plugin.saveSettings();
+					this.plugin.graphCache.invalidate();
+					this.plugin.refreshGraphView();
+				}));
+
+		new Setting(containerEl)
+			.setName("Bottom-right icon property")
+			.setDesc("Frontmatter property whose value renders as a badge in the bottom-right corner. Leave blank to disable.")
+			.addText((t) => t
+				.setPlaceholder("e.g. role")
+				.setValue(this.plugin.settings.bottomRightIconProperty)
+				.onChange(async (v) => {
+					this.plugin.settings.bottomRightIconProperty = v.trim();
+					await this.plugin.saveSettings();
+					this.plugin.graphCache.invalidate();
+					this.plugin.refreshGraphView();
+				}));
+
+		new Setting(containerEl)
 			.setName("Subtext property")
 			.setDesc("Frontmatter property whose value renders as italic subtext below the node. Leave blank to disable.")
 			.addText((t) => t

@@ -2,8 +2,8 @@ import { Core, NodeSingular } from "cytoscape";
 
 /**
  * Node badges: small DOM overlays pinned to each node's corners and below it,
- * driven by frontmatter through three configurable property names (top-left
- * icon, top-right icon, subtext).
+ * driven by frontmatter through configurable property names (top-left,
+ * top-right, bottom-left and bottom-right corner icons, plus subtext).
  *
  * Why DOM overlay rather than the Cytoscape stylesheet:
  *   - Cytoscape gives one label and one background image per node. Three
@@ -23,8 +23,8 @@ import { Core, NodeSingular } from "cytoscape";
  *     visual relationship between badge and node changes with zoom.
  *
  * Empty content is the explicit "skip this slot" signal. A node with no
- * topLeftIcon / topRightIcon / subtext gets no DOM nodes at all, keeping the
- * overlay minimal even on large graphs where most nodes have no badges.
+ * corner icons and no subtext gets no DOM nodes at all, keeping the overlay
+ * minimal even on large graphs where most nodes have no badges.
  */
 
 /**
@@ -87,14 +87,18 @@ export function setupNodeBadges(
 
 		const tl = makeBadgeSpan("top-left");
 		const tr = makeBadgeSpan("top-right");
+		const bl = makeBadgeSpan("bottom-left");
+		const br = makeBadgeSpan("bottom-right");
 		const sub = makeSubtextSpan();
 
 		el.appendChild(tl);
 		el.appendChild(tr);
+		el.appendChild(bl);
+		el.appendChild(br);
 		el.appendChild(sub);
 		overlay!.appendChild(el);
 
-		const group: BadgeGroup = { el, tl, tr, sub, lastContent: "" };
+		const group: BadgeGroup = { el, tl, tr, bl, br, sub, lastContent: "" };
 		groups.set(nodeId, group);
 		return group;
 	}
@@ -109,9 +113,11 @@ export function setupNodeBadges(
 		cy.nodes().forEach((node) => {
 			const tlText = (node.data("topLeftIcon") as string) || "";
 			const trText = (node.data("topRightIcon") as string) || "";
+			const blText = (node.data("bottomLeftIcon") as string) || "";
+			const brText = (node.data("bottomRightIcon") as string) || "";
 			const subText = (node.data("subtext") as string) || "";
 			// Skip nodes with no content entirely — no DOM allocated for them.
-			if (!tlText && !trText && !subText) {
+			if (!tlText && !trText && !blText && !brText && !subText) {
 				const stale = groups.get(node.id());
 				if (stale) {
 					stale.el.remove();
@@ -124,19 +130,23 @@ export function setupNodeBadges(
 
 			// Update text only if changed — avoid touching DOM when nothing
 			// substantive moved between frames.
-			const contentSig = `${tlText}|${trText}|${subText}`;
+			const contentSig = `${tlText}|${trText}|${blText}|${brText}|${subText}`;
 			if (g.lastContent !== contentSig) {
 				g.tl.textContent = tlText;
 				g.tr.textContent = trText;
+				g.bl.textContent = blText;
+				g.br.textContent = brText;
 				g.sub.textContent = subText;
 				// Show/hide each individually based on content.
 				g.tl.style.display = tlText ? "inline-block" : "none";
 				g.tr.style.display = trText ? "inline-block" : "none";
+				g.bl.style.display = blText ? "inline-block" : "none";
+				g.br.style.display = brText ? "inline-block" : "none";
 				g.sub.style.display = subText ? "block" : "none";
 				g.lastContent = contentSig;
 			}
 
-			positionGroup(g, node, zoom);
+			positionGroup(g, node, zoom, !!(blText || brText));
 		});
 
 		// GC any groups whose nodes are no longer in the graph (e.g. after a
@@ -180,11 +190,15 @@ interface BadgeGroup {
 	el: HTMLDivElement;
 	tl: HTMLSpanElement;  // top-left icon
 	tr: HTMLSpanElement;  // top-right icon
+	bl: HTMLSpanElement;  // bottom-left icon
+	br: HTMLSpanElement;  // bottom-right icon
 	sub: HTMLSpanElement; // subtext below the node
 	lastContent: string;  // signature of last-rendered text content (cheap dirty check)
 }
 
-function makeBadgeSpan(corner: "top-left" | "top-right"): HTMLSpanElement {
+function makeBadgeSpan(
+	corner: "top-left" | "top-right" | "bottom-left" | "bottom-right",
+): HTMLSpanElement {
 	const el = activeDocument.createElement("span");
 	el.className = `relations-node-badge relations-node-badge-${corner}`;
 	// All static styling (position, padding, border, font, colors,
@@ -227,7 +241,12 @@ function makeSubtextSpan(): HTMLSpanElement {
  * need additional scaling — only the badge's own visual size does, via the
  * scale transform.
  */
-function positionGroup(group: BadgeGroup, node: NodeSingular, zoom: number): void {
+function positionGroup(
+	group: BadgeGroup,
+	node: NodeSingular,
+	zoom: number,
+	hasBottomBadge: boolean,
+): void {
 	const pos = node.renderedPosition();
 	const w = node.renderedWidth();
 	const h = node.renderedHeight();
@@ -268,14 +287,31 @@ function positionGroup(group: BadgeGroup, node: NodeSingular, zoom: number): voi
 	group.tr.style.bottom = `${ringY}px`;
 	group.tr.style.transform = `scale(${zoom})`;
 
+	// Bottom-left icon: vertical mirror of top-left. Its TOP-RIGHT corner sits
+	// at (-ringX, +ringY), on the ring at the bottom-left diagonal. Positioned
+	// via `right`/`top`; transform-origin (100% 0%) and the `left: auto;
+	// bottom: auto` overrides come from .relations-node-badge-bottom-left.
+	group.bl.style.right = `${ringX}px`;
+	group.bl.style.top = `${ringY}px`;
+	group.bl.style.transform = `scale(${zoom})`;
+
+	// Bottom-right icon: mirror — its TOP-LEFT corner sits at (ringX, +ringY).
+	// transform-origin (0% 0%) and `right: auto; bottom: auto` overrides come
+	// from .relations-node-badge-bottom-right.
+	group.br.style.left = `${ringX}px`;
+	group.br.style.top = `${ringY}px`;
+	group.br.style.transform = `scale(${zoom})`;
+
 	// Subtext: centred horizontally beneath the node. Positioned via the
 	// bottom of the bounding box (halfH below centre) plus a gap that
-	// scales with zoom. The 24px clears the Cytoscape label pill that
-	// renders the note name. transform-origin (50% 0%) lives in the CSS
-	// class so static-styles lint is happy; translateX(-50%) centres
-	// horizontally after scaling and is combined with the per-frame
-	// scale in one transform here.
-	const subGap = 24 * zoom;
+	// scales with zoom. The default 24px clears the Cytoscape label pill that
+	// renders the note name. When bottom-corner badges are present the name
+	// label is pushed lower (see render.ts node[hasBottomBadge]), so the
+	// subtext needs a correspondingly larger gap to sit below it rather than
+	// on top of it. transform-origin (50% 0%) lives in the CSS class so
+	// static-styles lint is happy; translateX(-50%) centres horizontally after
+	// scaling and is combined with the per-frame scale in one transform here.
+	const subGap = (hasBottomBadge ? 34 : 24) * zoom;
 	group.sub.style.left = `0px`;
 	group.sub.style.top = `${halfH + subGap}px`;
 	group.sub.style.transform = `translateX(-50%) scale(${zoom})`;
