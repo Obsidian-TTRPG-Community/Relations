@@ -153,6 +153,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 			li.createEl("strong", { text: label });
 			li.appendText(` — ${body}`);
 		};
+		addHelpItem("Group", "optional: cluster related types under a shared heading in the legend (e.g. put parent and family in a \"Family\" group). Leave blank for ungrouped.");
 		addHelpItem("Sym", "symmetric: declaring on either note creates the relationship both ways.");
 		addHelpItem("Pair", "pull paired nodes very close (e.g. spouse, partner).");
 		addHelpItem("Tree", "when this type dominates a graph, lay it out top-down (e.g. family, parent).");
@@ -182,6 +183,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 						treeLayout: false,
 						lineStyle: "solid",
 						genealogy: false,
+						group: "",
 					});
 					await this.plugin.saveSettings();
 					this.redisplay();
@@ -323,6 +325,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 		// Header row labels
 		const header = container.createDiv({ cls: "relations-types-header" });
 		header.createSpan({ text: "Name", cls: "relations-types-header-cell relations-types-header-name" });
+		header.createSpan({ text: "Group", cls: "relations-types-header-cell relations-types-header-name" });
 		header.createSpan({ text: "Color", cls: "relations-types-header-cell" });
 		header.createSpan({ text: "Sym", cls: "relations-types-header-cell" });
 		header.createSpan({ text: "Pair", cls: "relations-types-header-cell" });
@@ -340,6 +343,20 @@ export class RelationsSettingTab extends PluginSettingTab {
 			nameInput.addEventListener("change", () => {
 				void (async () => {
 					this.plugin.settings.relationshipTypes[idx].name = nameInput.value.trim() || rt.name;
+					await this.plugin.saveSettings();
+					this.plugin.refreshGraphView();
+				})();
+			});
+
+			// Optional group label — clusters related types under a heading in the
+			// legend. Blank means ungrouped. Cosmetic only; no graph rescan.
+			const groupInput = row.createEl("input", { type: "text", cls: "relations-types-name" });
+			groupInput.value = rt.group ?? "";
+			groupInput.placeholder = "—";
+			groupInput.title = "Optional: cluster related types under a heading in the legend";
+			groupInput.addEventListener("change", () => {
+				void (async () => {
+					this.plugin.settings.relationshipTypes[idx].group = groupInput.value.trim();
 					await this.plugin.saveSettings();
 					this.plugin.refreshGraphView();
 				})();

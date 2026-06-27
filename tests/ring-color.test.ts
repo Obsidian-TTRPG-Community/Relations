@@ -31,6 +31,7 @@ function makeSettings(
 		requiredTags: [],
 		showLegend: true,
 		layout: "fcose",
+		disabledTypes: [],
 		showNodeLabels: true,
 		localGraphDepth: 2,
 		animateLayout: true,

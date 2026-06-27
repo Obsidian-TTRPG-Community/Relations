@@ -9,6 +9,35 @@ import {
 import { GraphCache } from "./graph-cache";
 
 /**
+ * Remove edges whose relationship type is in `disabled`, then drop any node left
+ * with no remaining edges. `keepNodeId` (the active/center note, when there is
+ * one) is always retained even if it becomes isolated, so the view never goes
+ * empty on the very note you're looking at.
+ *
+ * Pure and side-effect-free — returns a new graph, leaving the input untouched —
+ * so it's safe to apply to a cached graph without poisoning the cache. When
+ * nothing is disabled it returns the original graph reference unchanged.
+ */
+export function filterGraphByTypes(
+	graph: RelationsGraph,
+	disabled: ReadonlySet<string>,
+	keepNodeId?: string,
+): RelationsGraph {
+	if (disabled.size === 0) return graph;
+
+	const edges = graph.edges.filter((e) => !disabled.has(e.type));
+	const connected = new Set<string>();
+	for (const e of edges) {
+		connected.add(e.source);
+		connected.add(e.target);
+	}
+	const nodes = graph.nodes.filter(
+		(n) => connected.has(n.id) || n.id === keepNodeId,
+	);
+	return { nodes, edges };
+}
+
+/**
  * Build the full relationship graph by scanning every markdown file in scope.
  *
  * If a `cache` is provided, it's consulted first — a hit returns the previously-

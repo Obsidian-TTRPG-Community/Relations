@@ -8,6 +8,11 @@ export interface RelationshipType {
 	treeLayout: boolean;      // when this type dominates a graph, switch to top-down dagre
 	lineStyle: LineStyle;     // edge line appearance
 	genealogy: boolean;       // counts as a bloodline edge for family-graph layout (e.g. parent)
+	// Optional grouping label. Purely cosmetic: types sharing a group are
+	// clustered under a heading in the legend (e.g. put `parent` and `family`
+	// in a "Family" group). Empty/undefined means ungrouped. Does not affect
+	// graph structure, so it's excluded from the cache signature.
+	group?: string;
 }
 
 export type GraphMode = "full" | "local";
@@ -35,6 +40,13 @@ export interface RelationsSettings {
 	// Display
 	showLegend: boolean;
 	layout: "fcose" | "cose" | "dagre";
+
+	// Names of relationship types currently filtered OUT of the graph. Edges of
+	// these types (and any nodes left with no remaining edges) are hidden in both
+	// the side-panel view and code-block embeds. Persisted so the filter survives
+	// reloads. Empty = everything visible. Cosmetic/view-only: not part of the
+	// graph-cache signature, since it changes what's shown, not what's parsed.
+	disabledTypes: string[];
 
 	// Whether to show the note name under each node. Some users prefer a cleaner
 	// portrait-only graph, especially when nodes have recognisable images. Can be
@@ -101,6 +113,7 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 	requiredTags: [],
 	showLegend: true,
 	layout: "fcose",
+	disabledTypes: [],
 	showNodeLabels: true,
 	localGraphDepth: 2,
 	animateLayout: true,

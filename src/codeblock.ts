@@ -1,8 +1,9 @@
 import { App, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, parseYaml, setIcon, TFile } from "obsidian";
 import { Core } from "cytoscape";
 import { RelationsSettings, PositionStore, EdgeLabelStore, RelationshipType } from "./types";
-import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood } from "./graph";
+import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes } from "./graph";
 import { renderGraph, synthesizeInformalPartnerships, INFORMAL_PARTNERSHIP_LEGEND } from "./render";
+import { renderFilterPanel } from "./filter-panel";
 import type { GraphCache } from "./graph-cache";
 
 export type EmbedSize = "mini" | "small" | "large";
@@ -40,6 +41,8 @@ const DEFAULTS: CodeBlockOptions = {
 class RelationsBlockChild extends MarkdownRenderChild {
 	private cy: Core | null = null;
 	private locked = false;
+	private filterOpen = false;
+	private filterExpanded: Set<string> = new Set();
 	constructor(
 		containerEl: HTMLElement,
 		private app: App,
@@ -49,6 +52,10 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		private cache: GraphCache | null,
 		private store: PositionStore | null,
 		private labelStore: EdgeLabelStore | null = null,
+		// Persist + propagate filter changes. Invoked after the block mutates
+		// settings.disabledTypes so the change is saved and other open views
+		// refresh. Null in contexts with no plugin (e.g. unit tests).
+		private onSettingsChange: (() => void) | null = null,
 	) {
 		super(containerEl);
 	}
@@ -218,6 +225,10 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			highlightId = hostFile.path;
 		}
 
+		// Honour the global type filter (shared with the side-panel view). The
+		// host/center note is kept even if filtering would otherwise isolate it.
+		graph = filterGraphByTypes(graph, new Set(this.settings.disabledTypes), highlightId);
+
 		if (graph.nodes.length === 0) {
 			canvas.createDiv({
 				cls: "relations-empty",
@@ -269,6 +280,46 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				renderLegend(legend, legendTypes);
 			}
 		}
+
+		// Type filter — a collapsible panel for toggling relationship types on/off.
+		// Shares the same persisted state as the side-panel view. Skipped on mini
+		// embeds (no room) though the filter itself still applies to them.
+		if (effectiveSize !== "mini") this.addFilterControl(el);
+	}
+
+	private addFilterControl(host: HTMLElement): void {
+		const wrap = host.createDiv({ cls: "relations-embed-filter" });
+		const toggle = wrap.createEl("button", { cls: "relations-filter-toggle" });
+		const panel = wrap.createDiv({ cls: "relations-filter-panel" });
+
+		const activeFilter = this.settings.disabledTypes.length > 0;
+		setIcon(toggle, "list-filter");
+		toggle.createSpan({ text: "Filter" });
+		toggle.toggleClass("is-active", this.filterOpen || activeFilter);
+
+		const draw = (): void => {
+			panel.toggleClass("is-hidden", !this.filterOpen);
+			if (!this.filterOpen) {
+				panel.empty();
+				return;
+			}
+			renderFilterPanel(panel, this.settings, {
+				expanded: this.filterExpanded,
+				onChange: () => {
+					this.onSettingsChange?.();
+					// Re-render this block so the graph reflects the new filter.
+					this.render();
+				},
+			});
+		};
+
+		toggle.addEventListener("click", () => {
+			this.filterOpen = !this.filterOpen;
+			toggle.toggleClass("is-active", this.filterOpen || this.settings.disabledTypes.length > 0);
+			draw();
+		});
+
+		draw();
 	}
 }
 
@@ -295,19 +346,59 @@ export function renderLegend(
 	clear = false,
 ): void {
 	if (clear) host.empty();
-	for (const t of types) {
-		const item = host.createDiv({ cls: "relations-legend-item" });
-		const swatch = item.createSpan({ cls: `relations-legend-swatch is-${t.lineStyle}` });
-		// For dashed/dotted/double swatches, the visual is built with borders and
-		// pseudo-elements in CSS — the color comes from a CSS custom property so a
-		// single rule can reference it for foreground/background.
-		swatch.style.setProperty("--swatch-color", t.color);
-		let label = t.name;
-		if (!t.symmetric) label += " →";
-		if (t.pair) label += " ⚭";
-		if (t.treeLayout) label += " ⊥";
-		item.createSpan({ text: label });
+
+	// Grouping is opt-in: only kicks in when at least one type declares a
+	// non-empty group. With no groups we render the flat strip exactly as
+	// before, so existing legends are unchanged.
+	const hasGroups = types.some((t) => (t.group ?? "").trim() !== "");
+	if (!hasGroups) {
+		for (const t of types) renderLegendItem(host, t);
+		return;
 	}
+
+	// Partition into buckets keyed by group, preserving first-appearance order.
+	// "" is the ungrouped bucket and is rendered first with no heading so it
+	// keeps its place at the top of the legend.
+	const order: string[] = [];
+	const buckets = new Map<string, import("./types").RelationshipType[]>();
+	for (const t of types) {
+		const g = (t.group ?? "").trim();
+		if (!buckets.has(g)) {
+			buckets.set(g, []);
+			order.push(g);
+		}
+		buckets.get(g)!.push(t);
+	}
+
+	const ungroupedFirst = order.filter((g) => g === "").concat(order.filter((g) => g !== ""));
+	for (const g of ungroupedFirst) {
+		const items = buckets.get(g)!;
+		if (g === "") {
+			for (const t of items) renderLegendItem(host, t);
+		} else {
+			const group = host.createDiv({ cls: "relations-legend-group" });
+			group.createSpan({ cls: "relations-legend-group-title", text: g });
+			for (const t of items) renderLegendItem(group, t);
+		}
+	}
+}
+
+/** Render a single legend entry (swatch + label) into `host`. */
+function renderLegendItem(
+	host: HTMLElement,
+	t: import("./types").RelationshipType,
+): void {
+	const item = host.createDiv({ cls: "relations-legend-item" });
+	const swatch = item.createSpan({ cls: `relations-legend-swatch is-${t.lineStyle}` });
+	// For dashed/dotted/double swatches, the visual is built with borders and
+	// pseudo-elements in CSS — the color comes from a CSS custom property so a
+	// single rule can reference it for foreground/background.
+	swatch.style.setProperty("--swatch-color", t.color);
+	let label = t.name;
+	if (!t.symmetric) label += " →";
+	if (t.pair) label += " ⚭";
+	if (t.treeLayout) label += " ⊥";
+	item.createSpan({ text: label });
 }
 
 /**
@@ -331,9 +422,10 @@ export function processRelationsBlock(
 	cache: GraphCache | null = null,
 	store: PositionStore | null = null,
 	labelStore: EdgeLabelStore | null = null,
+	onSettingsChange: (() => void) | null = null,
 ): void {
 	const options = parseOptions(source);
-	const child = new RelationsBlockChild(el, app, settings, options, ctx, cache, store, labelStore);
+	const child = new RelationsBlockChild(el, app, settings, options, ctx, cache, store, labelStore, onSettingsChange);
 	ctx.addChild(child);
 }
 

@@ -3,14 +3,19 @@ import { Core } from "cytoscape";
 import type RelationsPlugin from "./main";
 import { VIEW_TYPE_RELATIONS, GraphMode, RelationsGraph } from "./types";
 import { renderGraph } from "./render";
-import { buildFullGraph, buildLocalGraph } from "./graph";
+import { buildFullGraph, buildLocalGraph, filterGraphByTypes } from "./graph";
 import { renderLegend } from "./codeblock";
+import { renderFilterPanel } from "./filter-panel";
 
 export class RelationsView extends ItemView {
 	private plugin: RelationsPlugin;
 	private cy: Core | null = null;
 	private canvas: HTMLElement | null = null;
 	private legendEl: HTMLElement | null = null;
+	private filterEl: HTMLElement | null = null;
+	private filterBtn: HTMLButtonElement | null = null;
+	private filterOpen = false;
+	private filterExpanded: Set<string> = new Set();
 	private modeBtnFull: HTMLButtonElement | null = null;
 	private modeBtnLocal: HTMLButtonElement | null = null;
 	private depthInput: HTMLInputElement | null = null;
@@ -85,9 +90,22 @@ export class RelationsView extends ItemView {
 		});
 		this.updateLabelsButton();
 
+		// Filter toggle — opens a collapsible panel for turning relationship types
+		// (and whole groups) on and off. Selections persist via settings.
+		this.filterBtn = toolbar.createEl("button", { text: "Filter" });
+		this.filterBtn.title = "Filter which relationship types are shown";
+		this.filterBtn.addEventListener("click", () => {
+			this.filterOpen = !this.filterOpen;
+			this.updateFilterButton();
+			this.renderFilter();
+		});
+		this.updateFilterButton();
+
 		this.subtitleEl = root.createDiv({ cls: "relations-subtitle" });
+		this.filterEl = root.createDiv({ cls: "relations-filter-panel" });
 		this.canvas = root.createDiv({ cls: "relations-canvas" });
 		this.legendEl = root.createDiv({ cls: "relations-legend" });
+		this.renderFilter();
 
 		// Re-render when active file changes (only matters in local mode)
 		this.registerEvent(
@@ -131,6 +149,31 @@ export class RelationsView extends ItemView {
 		this.labelsBtn?.toggleClass("is-active", this.plugin.settings.showNodeLabels !== false);
 	}
 
+	private updateFilterButton(): void {
+		// Active when the panel is open OR a filter is in effect, so the user has a
+		// visible cue that some types are hidden even with the panel collapsed.
+		const filtering = this.plugin.settings.disabledTypes.length > 0;
+		this.filterBtn?.toggleClass("is-active", this.filterOpen || filtering);
+	}
+
+	private renderFilter(): void {
+		if (!this.filterEl) return;
+		this.filterEl.toggleClass("is-hidden", !this.filterOpen);
+		if (!this.filterOpen) {
+			this.filterEl.empty();
+			return;
+		}
+		renderFilterPanel(this.filterEl, this.plugin.settings, {
+			expanded: this.filterExpanded,
+			onChange: () => {
+				void this.plugin.saveSettings();
+				this.updateFilterButton();
+				this.render();
+				this.renderFilter();
+			},
+		});
+	}
+
 	render(): void {
 		if (!this.canvas) return;
 
@@ -146,12 +189,25 @@ export class RelationsView extends ItemView {
 			}
 			graph = buildLocalGraph(this.app, this.plugin.settings, active.path, this.currentLocalDepth, this.plugin.graphCache);
 			highlightId = active.path;
-			this.setSubtitle(`Showing ${graph.nodes.length} node${graph.nodes.length === 1 ? "" : "s"} within ${this.currentLocalDepth} hop${this.currentLocalDepth === 1 ? "" : "s"} of ${active.basename}`);
-			useTree = shouldUseTreeLayout(graph, this.plugin.settings);
 		} else {
 			graph = buildFullGraph(this.app, this.plugin.settings, this.plugin.graphCache);
+		}
+
+		// Apply the type filter before measuring/rendering, so node counts, layout
+		// and the subtitle reflect only what's actually shown. The active note
+		// (local mode) is kept even if filtering would otherwise isolate it.
+		graph = filterGraphByTypes(
+			graph,
+			new Set(this.plugin.settings.disabledTypes),
+			highlightId,
+		);
+
+		if (this.mode === "local") {
+			const active = this.app.workspace.getActiveFile();
+			this.setSubtitle(`Showing ${graph.nodes.length} node${graph.nodes.length === 1 ? "" : "s"} within ${this.currentLocalDepth} hop${this.currentLocalDepth === 1 ? "" : "s"} of ${active?.basename ?? ""}`);
+			useTree = shouldUseTreeLayout(graph, this.plugin.settings);
+		} else {
 			this.setSubtitle(`Showing ${graph.nodes.length} note${graph.nodes.length === 1 ? "" : "s"} across the vault`);
-			useTree = false;
 		}
 
 		this.cy?.destroy();

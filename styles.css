@@ -115,6 +115,160 @@
 	gap: 6px;
 }
 
+/* A grouped cluster: its title followed by the group's items, wrapping as a
+   unit. A subtle left divider sets each group apart on the legend strip. */
+.relations-legend-group {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px;
+	padding-left: 12px;
+	border-left: 1px solid var(--background-modifier-border);
+}
+
+.relations-legend-group-title {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+/* ---------------------------------------------------------------------------
+   Type filter panel — used by the side-panel view and code-block embeds.
+   --------------------------------------------------------------------------- */
+.relations-filter-panel {
+	padding: 8px 12px;
+	border-top: 1px solid var(--background-modifier-border);
+	font-size: 12px;
+	max-height: 240px;
+	overflow-y: auto;
+	flex: 0 0 auto;
+}
+
+.relations-filter-panel.is-hidden { display: none; }
+
+.relations-filter-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 6px;
+}
+
+.relations-filter-title {
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	font-size: 11px;
+}
+
+.relations-filter-actions { display: flex; gap: 4px; }
+
+.relations-filter-action {
+	font-size: 11px;
+	padding: 2px 8px;
+	cursor: pointer;
+}
+
+.relations-filter-row {
+	display: flex;
+	align-items: center;
+	padding: 2px 0;
+}
+
+.relations-filter-row.is-child { padding-left: 22px; }
+
+.relations-filter-label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+	width: 100%;
+}
+
+.relations-filter-cb { cursor: pointer; }
+
+.relations-filter-swatch {
+	display: inline-block;
+	width: 16px;
+	height: 4px;
+	border-radius: 2px;
+	background-color: var(--swatch-color, #888888);
+	flex: 0 0 auto;
+}
+
+.relations-filter-swatch.is-dashed {
+	background-image: repeating-linear-gradient(to right, var(--swatch-color, #888) 0 3px, transparent 3px 6px);
+	background-color: transparent;
+}
+
+.relations-filter-swatch.is-dotted {
+	background-image: repeating-linear-gradient(to right, var(--swatch-color, #888) 0 1.5px, transparent 1.5px 5px);
+	background-color: transparent;
+}
+
+.relations-filter-swatch.is-double {
+	background-image: linear-gradient(var(--swatch-color, #888), var(--swatch-color, #888)),
+		linear-gradient(var(--swatch-color, #888), var(--swatch-color, #888));
+	background-size: 100% 1.5px;
+	background-position: top, bottom;
+	background-repeat: no-repeat;
+	background-color: transparent;
+}
+
+.relations-filter-name { color: var(--text-normal); }
+
+.relations-filter-group { margin-top: 2px; }
+
+.relations-filter-grouphead {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 0;
+}
+
+.relations-filter-chevron {
+	display: inline-flex;
+	align-items: center;
+	cursor: pointer;
+	color: var(--text-muted);
+}
+
+.relations-filter-chevron svg { width: 14px; height: 14px; }
+
+.relations-filter-groupname {
+	font-weight: 600;
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.relations-filter-count {
+	color: var(--text-muted);
+	font-size: 11px;
+	margin-left: auto;
+}
+
+.relations-filter-children.is-hidden { display: none; }
+
+/* Embed filter: a toggle button above a (reused) filter panel. */
+.relations-embed-filter { margin-top: 6px; }
+
+.relations-filter-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 11px;
+	padding: 2px 8px;
+	cursor: pointer;
+}
+
+.relations-filter-toggle.is-active {
+	color: var(--text-on-accent);
+	background-color: var(--interactive-accent);
+}
+
+.relations-filter-toggle svg { width: 14px; height: 14px; }
+
+.relations-embed-filter .relations-filter-panel { border-top: none; padding: 6px 0; }
+
 .relations-legend-swatch {
 	display: inline-block;
 	width: 18px;
@@ -264,7 +418,7 @@
 .relations-types-header,
 .relations-types-row {
 	display: grid;
-	grid-template-columns: 1fr 50px 50px 50px 50px 50px 90px 32px;
+	grid-template-columns: 1fr 0.7fr 50px 50px 50px 50px 50px 90px 32px;
 	gap: 8px;
 	align-items: center;
 	padding: 4px 0;

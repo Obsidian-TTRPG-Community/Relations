@@ -52,6 +52,9 @@ describe("GraphCache", () => {
 			layout: "dagre",
 			animateLayout: false,
 			localGraphDepth: 5,
+			// Type filtering is view-only (applied after the graph is built), so
+			// changing it must not invalidate the cached graph.
+			disabledTypes: ["enemy"],
 		};
 		expect(cache.get(cosmetic)).toBe(graph);
 	});

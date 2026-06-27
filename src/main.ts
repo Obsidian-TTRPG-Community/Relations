@@ -87,7 +87,10 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 			this.registerMarkdownCodeBlockProcessor(
 				lang,
 				(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-					processRelationsBlock(this.app, this.settings, source, el, ctx, this.graphCache, this, this);
+					processRelationsBlock(this.app, this.settings, source, el, ctx, this.graphCache, this, this, () => {
+						void this.saveSettings();
+						this.refreshGraphView();
+					});
 				},
 			);
 		}
@@ -140,8 +143,21 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 				// genealogy default: only `parent` (case-insensitive) starts as true so
 				// existing users with a parent type still get a sensible family-graph view.
 				genealogy: partial.genealogy ?? (t.name.toLowerCase() === "parent"),
+				// Optional cosmetic legend group. The map reconstructs each type
+				// with an explicit field list, so this must be carried through or
+				// it would be silently dropped on every load.
+				group: typeof partial.group === "string" ? partial.group : "",
 			};
 		});
+		// disabledTypes: filter state for relationship types. Older settings won't
+		// have it; default to an empty array (everything visible). Also drop any
+		// stale entries that no longer correspond to a configured type.
+		if (!Array.isArray(this.settings.disabledTypes)) {
+			this.settings.disabledTypes = [];
+		} else {
+			const known = new Set(this.settings.relationshipTypes.map((t) => t.name));
+			this.settings.disabledTypes = this.settings.disabledTypes.filter((n) => known.has(n));
+		}
 		if (!this.settings.imageProperty) this.settings.imageProperty = DEFAULT_SETTINGS.imageProperty;
 		if (typeof this.settings.localGraphDepth !== "number") {
 			this.settings.localGraphDepth = DEFAULT_SETTINGS.localGraphDepth;
