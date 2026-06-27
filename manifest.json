@@ -1,7 +1,7 @@
 {
   "id": "relations",
   "name": "Relations",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "minAppVersion": "1.7.2",
   "description": "Visualise relationships between notes — for worldbuilding, fiction, TTRPG campaigns, genealogies, or any project where seeing how things connect matters.",
   "author": "Obsidian TTRPG Community",
