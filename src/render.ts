@@ -613,6 +613,7 @@ function toCytoscape(
 			image: n.image ?? "",
 			hasImage: n.image ? "true" : "false",
 			highlight: highlightId && n.id === highlightId ? "true" : "false",
+			isPhantom: n.isPhantom ? 'true' : 'false',
 		};
 		// ringColor is set ONLY when a rule matched, so the selector
 		// `node[ringColor]` (presence test) correctly distinguishes styled
@@ -715,6 +716,22 @@ function buildStyle(theme: ThemeColors, compact: boolean, showLabels: boolean): 
 				"border-color": theme.bgModBorder,
 				"shape": "ellipse",
 			},
+		},
+		// Phantom nodes rendered at 50% opacity with dashed border.
+		{
+			selector: "node[isPhantom = 'true']",
+			style: {
+				opacity: 0.5,
+				'border-style': 'dashed',
+				'border-width': 2,
+			} as any,
+		},
+		// Phantom nodes that are selected are brighted to 80% so they're readable.
+		{
+			selector: "node[isPhantom = 'true']:selected",
+			style: {
+				opacity: 0.8,
+			} as any,
 		},
 		{
 			// Nodes with bottom-corner badges: drop the name label lower so it

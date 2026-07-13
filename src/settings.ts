@@ -144,6 +144,28 @@ export class RelationsSettingTab extends PluginSettingTab {
 					this.plugin.refreshGraphView();
 				}));
 
+		// Phantom Nodes settings
+		new Setting(containerEl)
+			.setName("Phantom Placeholder Image")
+			.setDesc(
+				"Path to the image shown for unresolved references (e.g., 'z_Assets/Placeholder_Person.png'). " +
+				"Leave blank to show no image."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("z_Assets/Placeholder_Person.png")
+					.setValue(this.plugin.settings.phantomPlaceholderImage)
+					.onChange(async (value) => {
+						this.plugin.settings.phantomPlaceholderImage = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		containerEl.createEl("p", {
+			text: "Phantom nodes are references to notes that don't exist yet. They appear faded and grayscale to distinguish them from real notes.",
+			cls: "setting-item-description",
+		});
+
 		new Setting(containerEl).setName("Connection types").setHeading();
 		const help = containerEl.createDiv({ cls: "setting-item-description" });
 		help.createEl("p", { text: "Each row is one relationship type, matched by frontmatter property name." });

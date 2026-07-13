@@ -84,6 +84,9 @@ export interface RelationsSettings {
 	bottomLeftIconProperty: string;
 	bottomRightIconProperty: string;
 	subtextProperty: string;
+
+	// Phantom node placeholder image (vault path)
+	phantomPlaceholderImage: string;
 }
 
 export const DEFAULT_SETTINGS: RelationsSettings = {
@@ -126,7 +129,15 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 	bottomLeftIconProperty: "",
 	bottomRightIconProperty: "",
 	subtextProperty: "",
+	phantomPlaceholderImage: "",
 };
+
+export interface ParsedLink {
+	target: string;
+	displayName: string;
+	source: "plain-text" | "wikilink" | "wikilink-alias";
+	isResolved: boolean;
+}
 
 // Internal model
 export interface GraphNode {
@@ -134,6 +145,8 @@ export interface GraphNode {
 	label: string;         // basename
 	tags: string[];
 	image: string | null;  // resolved resource URL or null
+	// Whether this node represents an unresolved reference. (no .md file exists)
+	isPhantom?: boolean;
 	// Optional outer-ring color for the node. Driven by frontmatter via the
 	// settings.ringColorProperty + settings.ringColorRules mapping. Undefined
 	// means "no ring color rule applied" — the node uses the default border

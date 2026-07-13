@@ -5,8 +5,120 @@ import {
 	GraphEdge,
 	RelationsSettings,
 	RelationshipType,
+	ParsedLink,
 } from "./types";
 import { GraphCache } from "./graph-cache";
+
+/**
+ * Parse a single link value from frontmatter into a ParsedLink.
+ * Handles three formats:
+ *   1. Plain text: "Alice" → target: "alice", displayName: "Alice"
+ *   2. Wikilink: "[[Alice]]" → target: "alice", displayName: "Alice"
+ *   3. Aliased: "[[Alice|Bobby]]" → target: "alice", displayName: "Bobby"
+ *
+ * Plain text is case-insensitive for vault lookup (target is lowercased),
+ * but preserves user's casing in displayName.
+ */
+export function parseLink(value: unknown): ParsedLink | null {
+	if (value == null) return null;
+	if (typeof value !== "string") return null;
+
+	const s = value.trim();
+	if (!s) return null;
+
+	// Try wikilink format: [[...]]
+	const wikiMatch = s.match(/^\[\[([^\]]+)\]\]$/);
+	if (wikiMatch) {
+		const content = wikiMatch[1].trim();
+		if (!content) return null;
+
+		// Check for pipe alias: "target|display"
+		const pipeIdx = content.indexOf("|");
+		if (pipeIdx >= 0) {
+			const target = content.slice(0, pipeIdx).trim();
+			const displayName = content.slice(pipeIdx + 1).trim();
+			if (target && displayName) {
+				return {
+					target: normalizeNoteName(target),
+					displayName,
+					source: "wikilink-alias",
+					isResolved: false,
+				};
+			}
+		}
+
+		// No pipe: "[[Alice]]" or "[[Alice#section]]"
+		const hashIdx = content.indexOf("#");
+		const target = (hashIdx >= 0 ? content.slice(0, hashIdx) : content).trim();
+		if (target) {
+			return {
+				target: normalizeNoteName(target),
+				displayName: target,
+				source: "wikilink",
+				isResolved: false,
+			};
+		}
+	}
+
+	// Plain text: "Alice" or "alice"
+	const normalized = normalizeNoteName(s);
+	if (normalized) {
+		return {
+			target: normalized,
+			displayName: s,
+			source: "plain-text",
+			isResolved: false,
+		};
+	}
+
+	return null;
+}
+
+/**
+ * Normalize a note name for case-insensitive comparison.
+ * Lowercases the input. Returns empty string if input is blank.
+ */
+export function normalizeNoteName(name: string): string {
+	return name.trim().toLowerCase();
+}
+
+/**
+ * Extract ParsedLink objects from a frontmatter value.
+ * Handles: single values, arrays, comma-separated strings, and nested arrays.
+ *
+ * Returns array of ParsedLink objects. Invalid entries are skipped.
+ */
+export function extractParsedLinks(value: unknown): ParsedLink[] {
+	if (value == null) return [];
+	if (Array.isArray(value)) {
+		return value.flatMap((v) => extractParsedLinks(v));
+	}
+	if (typeof value !== "string") return [];
+
+	const s = value.trim();
+	if (!s) return [];
+
+	// Check for wikilinks first
+	const wikiRegex = /\[\[([^\]]+)\]\]/g;
+	const wikiMatches = [...s.matchAll(wikiRegex)];
+	if (wikiMatches.length > 0) {
+		return wikiMatches
+			.map((m) => parseLink(`[[${m[1]}]]`))
+			.filter((p): p is ParsedLink => p !== null);
+	}
+
+	// No wikilinks: check for comma-separated plain text
+	if (s.includes(",")) {
+		return s
+			.split(",")
+			.map((part) => parseLink(part.trim()))
+			.filter((p): p is ParsedLink => p !== null);
+	}
+
+	// Single plain text value
+	const parsed = parseLink(s);
+	return parsed ? [parsed] : [];
+}
 
 /**
  * Remove edges whose relationship type is in `disabled`, then drop any node left
@@ -60,6 +172,8 @@ export function buildFullGraph(
 
 	const notePaths = new Set<string>();
 	const rawEdges: GraphEdge[] = [];
+	// maps normalized target names for unresolved refs.
+	const phantomNodes = new Map<string, { displayName: string }>();
 
 	for (const file of files) {
 		const cache = app.metadataCache.getFileCache(file);
@@ -115,17 +229,39 @@ export function buildFullGraph(
 		}
 	}
 
-	const nodes: GraphNode[] = [];
-	for (const path of notePaths) {
-		const f = app.vault.getAbstractFileByPath(path);
-		if (!(f instanceof TFile)) continue;
-		const node = buildNode(app, f, settings);
-		if (node) nodes.push(node);
-	}
-
+	// Deduplicate edges first, filtering to valid path combinations
 	const edges = dedupeEdges(rawEdges.filter(
 		(e) => notePaths.has(e.source) && notePaths.has(e.target),
 	));
+
+	const placeholderPath = app.metadataCache.getFirstLinkpathDest(
+		settings.phantomPlaceholderImage.trim(),
+		""
+	);
+	const placeholderImage = placeholderPath instanceof TFile
+		? app.vault.getResourcePath(placeholderPath)
+		: null;
+
+	const nodes: GraphNode[] = [];
+	// Build real nodes from files
+	for (const path of notePaths) {
+		const f = app.vault.getAbstractFileByPath(path);
+		if (f instanceof TFile) {
+			const node = buildNode(app, f, settings);
+			if (node) nodes.push(node);
+		} else if (phantomNodes.has(path)) {
+			// This is a phantom node — use one of its displayNames as the label
+			const phantom = phantomNodes.get(path)!;
+			nodes.push({
+				id: path,
+				label: phantom.displayName,
+				tags: [],
+				image: placeholderImage,
+				isPhantom: true,
+			});
+		}
+	}
+
 
 	const result = { nodes, edges };
 	if (cache) cache.set(settings, result);
