@@ -38,6 +38,66 @@ export function filterGraphByTypes(
 }
 
 /**
+ * Filter a graph to show only edges whose type's group is in the enabled set — a strict
+ * match. Ungrouped types (no `group` set) are excluded, same as any type whose group
+ * isn't in enabledGroups. Drops any node left with no remaining edges (except
+ * keepNodeId, the active/center note).
+ *
+ * Pure and side-effect-free — returns a new graph, leaving the input untouched.
+ * When enabledGroups is empty it returns the original graph reference unchanged.
+ *
+ * KNOWN LIMITATION: this only strips edges from an already-built graph. For
+ * scope: local / connected, the hop-limited neighborhood (buildLocalGraph /
+ * buildConnectedGraph) is walked over ALL edge types before this runs, so a
+ * note reachable only through a now-hidden type can still surface here if it
+ * happens to have its own edges of a visible type (they keep it from being
+ * pruned as isolated) — it renders as a seemingly disconnected extra node/
+ * cluster. Fixing this needs hop-distance computed over the pre-filtered edge
+ * set instead, which touches buildLocalGraph/buildConnectedGraph and would
+ * change the pre-existing disabledTypes filter's behavior too — out of scope
+ * for this filter alone. See README's "Known limitation" callout.
+ *
+ * @param graph - The graph to filter
+ * @param enabledGroups - Set of group names to include (OR logic)
+ * @param keepNodeId - Optional node to retain even if isolated (e.g., center note)
+ * @param relationshipTypes - Array of relationship types to look up group membership
+ */
+export function filterGraphByGroups(
+	graph: RelationsGraph,
+	enabledGroups: ReadonlySet<string>,
+	keepNodeId?: string,
+	relationshipTypes: RelationshipType[] = [],
+): RelationsGraph {
+	if (enabledGroups.size === 0) return graph;
+
+	// Build a map of type name → type definition for quick group lookup
+	const typeMap = new Map<string, RelationshipType>();
+	for (const t of relationshipTypes) {
+		typeMap.set(t.name, t);
+	}
+
+	// Keep only edges whose type's group is in the enabled set. Ungrouped types
+	// don't match any requested group, so they're excluded.
+	const edges = graph.edges.filter((e) => {
+		const type = typeMap.get(e.type);
+		if (!type) return true;  // Type not found, include it (defensive)
+		return type.group ? enabledGroups.has(type.group) : false;
+	});
+
+	// Prune nodes left with no remaining edges
+	const connected = new Set<string>();
+	for (const e of edges) {
+		connected.add(e.source);
+		connected.add(e.target);
+	}
+	const nodes = graph.nodes.filter(
+		(n) => connected.has(n.id) || n.id === keepNodeId,
+	);
+
+	return { nodes, edges };
+}
+
+/**
  * Build the full relationship graph by scanning every markdown file in scope.
  *
  * If a `cache` is provided, it's consulted first — a hit returns the previously-
