@@ -1,12 +1,12 @@
-import cytoscape, { Core } from "cytoscape";
-import { RelationsGraph } from "./types";
-import { computeEffectiveParents } from "./family-parenting";
+import cytoscape, { Core } from 'cytoscape';
+import { RelationsGraph } from './types';
+import { computeEffectiveParents } from './family-parenting';
 
-const SVG_NS = "http://www.w3.org/2000/svg";
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 interface FamilyGroup {
-	parents: string[];
-	children: string[];
+  parents: string[];
+  children: string[];
 }
 
 /**
@@ -24,8 +24,13 @@ interface FamilyGroup {
  * holds the label; if neither does, the editor opens for the first parent.
  */
 export interface OverlayLabelHooks {
-	getGenealogyLabel(child: string, parent: string): string;
-	editGenealogyLabel(child: string, parent: string, clientX: number, clientY: number): void;
+  getGenealogyLabel(child: string, parent: string): string;
+  editGenealogyLabel(
+    child: string,
+    parent: string,
+    clientX: number,
+    clientY: number
+  ): void;
 }
 
 /**
@@ -38,35 +43,38 @@ export interface OverlayLabelHooks {
  * loop won't fire on its own). Callers without labels can ignore it.
  */
 export function drawFamilyConnectors(
-	cy: Core,
-	graph: RelationsGraph,
-	container: HTMLElement,
-	compact: boolean,
-	labelHooks: OverlayLabelHooks | null = null,
+  cy: Core,
+  graph: RelationsGraph,
+  container: HTMLElement,
+  compact: boolean,
+  labelHooks: OverlayLabelHooks | null = null
 ): () => void {
-	cy.edges(".genealogy").style("opacity", 0);
+  cy.edges('.genealogy').style('opacity', 0);
 
-	const groups = buildFamilyGroups(graph);
-	const pairAdj = buildPairAdjacency(graph);
-	const g = createOverlay(container);
-	// All connectors share one color — per-genealogy-type differentiation not yet supported.
-	const stroke = graph.edges.find((e) => e.genealogy)?.color || "#888888";
-	const width = compact ? 1.5 : 2.5;
-	const fontSize = compact ? 9 : 11;
+  // Deduplicate genealogy edges (graph.ts already inverts parent-declaring fields).
+  const normalizedGraph = deduplicateGenealogyEdges(graph);
 
-	function redraw(): void {
-		while (g.firstChild) g.removeChild(g.firstChild);
-		for (const [, group] of groups) {
-			drawGroup(g, cy, group, stroke, width, fontSize, labelHooks);
-		}
-	}
+  const groups = buildFamilyGroups(normalizedGraph);
+  const pairAdj = buildPairAdjacency(normalizedGraph);
+  const g = createOverlay(container);
+  // All connectors share one color — per-genealogy-type differentiation not yet supported.
+  const stroke = graph.edges.find((e) => e.genealogy)?.color || '#888888';
+  const width = compact ? 1.5 : 2.5;
+  const fontSize = compact ? 9 : 11;
 
-	redraw();
-	syncViewport(cy, g);
-	onPositionChange(cy, redraw);
-	enableSpouseDrag(cy, pairAdj);
+  function redraw(): void {
+    while (g.firstChild) g.removeChild(g.firstChild);
+    for (const [, group] of groups) {
+      drawGroup(g, cy, group, stroke, width, fontSize, labelHooks);
+    }
+  }
 
-	return redraw;
+  redraw();
+  syncViewport(cy, g);
+  onPositionChange(cy, redraw);
+  enableSpouseDrag(cy, pairAdj);
+
+  return redraw;
 }
 
 /** Group children by their shared parent-set from genealogy edges.
@@ -78,245 +86,273 @@ export function drawFamilyConnectors(
  *  dropped from the layout's parent set so the child renders as the lover's
  *  single-parent child. See family-parenting.ts for the full rule. */
 function buildFamilyGroups(graph: RelationsGraph): Map<string, FamilyGroup> {
-	const parentsOf = computeEffectiveParents(graph);
+  const parentsOf = computeEffectiveParents(graph);
 
-	const groups = new Map<string, FamilyGroup>();
-	for (const [child, parents] of parentsOf) {
-		const sorted = [...parents].sort();
-		const key = sorted.join("|");
-		if (!groups.has(key)) {
-			groups.set(key, { parents: sorted, children: [] });
-		}
-		groups.get(key)!.children.push(child);
-	}
-	return groups;
+  const groups = new Map<string, FamilyGroup>();
+  for (const [child, parents] of parentsOf) {
+    const sorted = [...parents].sort();
+    const key = sorted.join('|');
+    if (!groups.has(key)) {
+      groups.set(key, { parents: sorted, children: [] });
+    }
+    groups.get(key)!.children.push(child);
+  }
+  return groups;
+}
+
+/**
+ * Deduplicate genealogy edges between the same pair of nodes.
+ * Graph.ts already handles direction normalization for parent-declaring fields,
+ * so this function only needs to remove duplicate edges.
+ */
+function deduplicateGenealogyEdges(graph: RelationsGraph): RelationsGraph {
+  // Deduplicate genealogy edges: same pair of nodes → keep only one
+  const seenGenealogy = new Set<string>();
+  const dedupedEdges = graph.edges.filter((e) => {
+    if (!e.genealogy) return true;
+    // Normalize pair order so A→B and B→A have the same key
+    const [a, b] = [e.source, e.target].sort();
+    const key = `${a}|${b}`;
+    if (seenGenealogy.has(key)) return false;
+    seenGenealogy.add(key);
+    return true;
+  });
+
+  return { nodes: graph.nodes, edges: dedupedEdges };
 }
 
 /** Symmetric adjacency map of pair (spouse/partner) connections. */
-function buildPairAdjacency(
-	graph: RelationsGraph,
-): Map<string, Set<string>> {
-	const adj = new Map<string, Set<string>>();
-	for (const e of graph.edges) {
-		if (!e.pair) continue;
-		if (!adj.has(e.source)) adj.set(e.source, new Set());
-		if (!adj.has(e.target)) adj.set(e.target, new Set());
-		adj.get(e.source)!.add(e.target);
-		adj.get(e.target)!.add(e.source);
-	}
-	return adj;
+function buildPairAdjacency(graph: RelationsGraph): Map<string, Set<string>> {
+  const adj = new Map<string, Set<string>>();
+  for (const e of graph.edges) {
+    if (!e.pair) continue;
+    if (!adj.has(e.source)) adj.set(e.source, new Set());
+    if (!adj.has(e.target)) adj.set(e.target, new Set());
+    adj.get(e.source)!.add(e.target);
+    adj.get(e.target)!.add(e.source);
+  }
+  return adj;
 }
 
 /** Create (or replace) the SVG overlay element inside the container. */
 function createOverlay(container: HTMLElement): SVGGElement {
-	container.querySelector("svg.family-connectors-svg")?.remove();
+  container.querySelector('svg.family-connectors-svg')?.remove();
 
-	const svg = activeDocument.createElementNS(SVG_NS, "svg");
-	svg.classList.add("family-connectors-svg");
-	Object.assign(svg.style, {
-		position: "absolute",
-		top: "0",
-		left: "0",
-		width: "100%",
-		height: "100%",
-		pointerEvents: "none",
-		overflow: "visible",
-	});
-	container.appendChild(svg);
+  const svg = activeDocument.createElementNS(SVG_NS, 'svg');
+  svg.classList.add('family-connectors-svg');
+  Object.assign(svg.style, {
+    position: 'absolute',
+    top: '0',
+    left: '0',
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none',
+    overflow: 'visible',
+  });
+  container.appendChild(svg);
 
-	const g = activeDocument.createElementNS(SVG_NS, "g");
-	svg.appendChild(g);
-	return g;
+  const g = activeDocument.createElementNS(SVG_NS, 'g');
+  svg.appendChild(g);
+  return g;
 }
 
 /** Draw orthogonal connectors for one parent-set → children unit. */
 function drawGroup(
-	g: SVGGElement,
-	cy: Core,
-	group: FamilyGroup,
-	stroke: string,
-	strokeWidth: number,
-	fontSize: number,
-	labelHooks: OverlayLabelHooks | null,
+  g: SVGGElement,
+  cy: Core,
+  group: FamilyGroup,
+  stroke: string,
+  strokeWidth: number,
+  fontSize: number,
+  labelHooks: OverlayLabelHooks | null
 ): void {
-	const parentEles = group.parents
-		.map((id) => cy.getElementById(id))
-		.filter((e) => e.length > 0);
-	// Keep child id alongside its position+radius so labels can be looked up
-	// per-edge. Discarded position-only mapping made labels impossible.
-	const childData = group.children
-		.map((id) => ({ id, ele: cy.getElementById(id) }))
-		.filter((c) => c.ele.length > 0)
-		.map((c) => ({ id: c.id, pos: c.ele.position(), r: c.ele.width() / 2 }));
+  const parentEles = group.parents
+    .map((id) => cy.getElementById(id))
+    .filter((e) => e.length > 0);
+  // Keep child id alongside its position+radius so labels can be looked up
+  // per-edge. Discarded position-only mapping made labels impossible.
+  const childData = group.children
+    .map((id) => ({ id, ele: cy.getElementById(id) }))
+    .filter((c) => c.ele.length > 0)
+    .map((c) => ({ id: c.id, pos: c.ele.position(), r: c.ele.width() / 2 }));
 
-	if (parentEles.length === 0 || childData.length === 0) return;
+  if (parentEles.length === 0 || childData.length === 0) return;
 
-	const parentPos = parentEles.map((e) => e.position());
-	const parentR = Math.max(...parentEles.map((e) => e.width() / 2));
-	const childRMax = Math.max(...childData.map((c) => c.r));
+  const parentPos = parentEles.map((e) => e.position());
+  const parentR = Math.max(...parentEles.map((e) => e.width() / 2));
+  const childRMax = Math.max(...childData.map((c) => c.r));
 
-	const midX = parentPos.reduce((s, p) => s + p.x, 0) / parentPos.length;
-	const maxParentY = Math.max(...parentPos.map((p) => p.y));
-	const minChildY = Math.min(...childData.map((c) => c.pos.y));
+  const midX = parentPos.reduce((s, p) => s + p.x, 0) / parentPos.length;
+  const maxParentY = Math.max(...parentPos.map((p) => p.y));
+  const minChildY = Math.min(...childData.map((c) => c.pos.y));
 
-	const gapTop = maxParentY + parentR;
-	const gapBot = Math.max(minChildY - childRMax, gapTop + 20);
-	const dropY = gapTop + (gapBot - gapTop) * 0.3;
+  const gapTop = maxParentY + parentR;
+  const gapBot = Math.max(minChildY - childRMax, gapTop + 20);
+  const dropY = gapTop + (gapBot - gapTop) * 0.3;
 
-	// Two-parent: drop from the pair-edge midpoint. Single: from node bottom.
-	const dropStartY =
-		parentPos.length === 2
-			? (parentPos[0].y + parentPos[1].y) / 2
-			: gapTop;
+  // Two-parent: drop from the pair-edge midpoint. Single: from node bottom.
+  const dropStartY =
+    parentPos.length === 2 ? (parentPos[0].y + parentPos[1].y) / 2 : gapTop;
 
-	addPath(g, `M${midX},${dropStartY} V${dropY}`, stroke, strokeWidth);
+  addPath(g, `M${midX},${dropStartY} V${dropY}`, stroke, strokeWidth);
 
-	// Render the per-child stem + (if a label exists) a label, plus an
-	// invisible hit zone wide enough to be double-clickable.
-	const renderChildStem = (
-		childId: string,
-		childPos: { x: number; y: number },
-		childR: number,
-		stemPathD: string,
-		stemTopY: number,
-		stemBotY: number,
-	) => {
-		addPath(g, stemPathD, stroke, strokeWidth);
-		if (!labelHooks) return;
+  // Render the per-child stem + (if a label exists) a label, plus an
+  // invisible hit zone wide enough to be double-clickable.
+  const renderChildStem = (
+    childId: string,
+    childPos: { x: number; y: number },
+    childR: number,
+    stemPathD: string,
+    stemTopY: number,
+    stemBotY: number
+  ) => {
+    addPath(g, stemPathD, stroke, strokeWidth);
+    if (!labelHooks) return;
 
-		// Position the label at the midpoint of the stem's vertical extent.
-		// stemTopY is where the stem meets the bar/drop; stemBotY is the top
-		// of the child node circle.
-		const labelX = childPos.x;
-		const labelY = stemTopY + (stemBotY - stemTopY) * 0.5;
+    // Position the label at the midpoint of the stem's vertical extent.
+    // stemTopY is where the stem meets the bar/drop; stemBotY is the top
+    // of the child node circle.
+    const labelX = childPos.x;
+    const labelY = stemTopY + (stemBotY - stemTopY) * 0.5;
 
-		const parents = group.parents;
-		const labels = parents.map((p) => labelHooks.getGenealogyLabel(childId, p)).filter((s) => s);
-		if (labels.length > 0) {
-			addTextLabel(g, labels.join(" / "), labelX, labelY, fontSize, (evt) => {
-				const editTarget = parents.find((p) => labelHooks.getGenealogyLabel(childId, p)) ?? parents[0];
-				labelHooks.editGenealogyLabel(childId, editTarget, evt.clientX, evt.clientY);
-			});
-		}
+    const parents = group.parents;
+    const labels = parents
+      .map((p) => labelHooks.getGenealogyLabel(childId, p))
+      .filter((s) => s);
+    if (labels.length > 0) {
+      addTextLabel(g, labels.join(' / '), labelX, labelY, fontSize, (evt) => {
+        const editTarget =
+          parents.find((p) => labelHooks.getGenealogyLabel(childId, p)) ??
+          parents[0];
+        labelHooks.editGenealogyLabel(
+          childId,
+          editTarget,
+          evt.clientX,
+          evt.clientY
+        );
+      });
+    }
 
-		// Hit zone — invisible thick stroke along the stem so users can
-		// double-click the connector (even when no label exists) to open
-		// the editor. Edits the first parent that has a label, else the
-		// leftmost-listed parent.
-		addHitZone(g, stemPathD, (evt) => {
-			const editTarget = parents.find((p) => labelHooks.getGenealogyLabel(childId, p)) ?? parents[0];
-			labelHooks.editGenealogyLabel(childId, editTarget, evt.clientX, evt.clientY);
-		});
-	};
+    // Hit zone — invisible thick stroke along the stem so users can
+    // double-click the connector (even when no label exists) to open
+    // the editor. Edits the first parent that has a label, else the
+    // leftmost-listed parent.
+    addHitZone(g, stemPathD, (evt) => {
+      const editTarget =
+        parents.find((p) => labelHooks.getGenealogyLabel(childId, p)) ??
+        parents[0];
+      labelHooks.editGenealogyLabel(
+        childId,
+        editTarget,
+        evt.clientX,
+        evt.clientY
+      );
+    });
+  };
 
-	if (childData.length === 1) {
-		const c = childData[0];
-		const stemBotY = c.pos.y - c.r;
-		const stemD = Math.abs(c.pos.x - midX) < 2
-			? `M${midX},${dropY} V${stemBotY}`
-			: `M${midX},${dropY} H${c.pos.x} V${stemBotY}`;
-		renderChildStem(c.id, c.pos, c.r, stemD, dropY, stemBotY);
-		return;
-	}
+  if (childData.length === 1) {
+    const c = childData[0];
+    const stemBotY = c.pos.y - c.r;
+    const stemD =
+      Math.abs(c.pos.x - midX) < 2
+        ? `M${midX},${dropY} V${stemBotY}`
+        : `M${midX},${dropY} H${c.pos.x} V${stemBotY}`;
+    renderChildStem(c.id, c.pos, c.r, stemD, dropY, stemBotY);
+    return;
+  }
 
-	const sortedX = [...childData].map((c) => c.pos.x).sort((a, b) => a - b);
-	const barLeft = Math.min(sortedX[0], midX);
-	const barRight = Math.max(sortedX[sortedX.length - 1], midX);
+  const sortedX = [...childData].map((c) => c.pos.x).sort((a, b) => a - b);
+  const barLeft = Math.min(sortedX[0], midX);
+  const barRight = Math.max(sortedX[sortedX.length - 1], midX);
 
-	addPath(g, `M${barLeft},${dropY} H${barRight}`, stroke, strokeWidth);
+  addPath(g, `M${barLeft},${dropY} H${barRight}`, stroke, strokeWidth);
 
-	for (const c of childData) {
-		const stemBotY = c.pos.y - c.r;
-		const stemD = `M${c.pos.x},${dropY} V${stemBotY}`;
-		renderChildStem(c.id, c.pos, c.r, stemD, dropY, stemBotY);
-	}
+  for (const c of childData) {
+    const stemBotY = c.pos.y - c.r;
+    const stemD = `M${c.pos.x},${dropY} V${stemBotY}`;
+    renderChildStem(c.id, c.pos, c.r, stemD, dropY, stemBotY);
+  }
 }
 
 /** Keep the SVG group transform in sync with Cytoscape's viewport. */
 function syncViewport(cy: Core, g: SVGGElement): void {
-	function sync(): void {
-		const pan = cy.pan();
-		const zoom = cy.zoom();
-		g.setAttribute(
-			"transform",
-			`translate(${pan.x},${pan.y}) scale(${zoom})`,
-		);
-	}
-	cy.on("pan zoom resize", sync);
-	sync();
+  function sync(): void {
+    const pan = cy.pan();
+    const zoom = cy.zoom();
+    g.setAttribute('transform', `translate(${pan.x},${pan.y}) scale(${zoom})`);
+  }
+  cy.on('pan zoom resize', sync);
+  sync();
 }
 
 /** Redraw connectors when any node moves, coalesced to one repaint per frame. */
 function onPositionChange(cy: Core, redraw: () => void): void {
-	let scheduled = false;
-	cy.on("position", "node", () => {
-		if (scheduled) return;
-		scheduled = true;
-		window.requestAnimationFrame(() => {
-			scheduled = false;
-			redraw();
-		});
-	});
+  let scheduled = false;
+  cy.on('position', 'node', () => {
+    if (scheduled) return;
+    scheduled = true;
+    window.requestAnimationFrame(() => {
+      scheduled = false;
+      redraw();
+    });
+  });
 }
 
 /** Move pair-connected partners in lockstep when a node is dragged. */
-function enableSpouseDrag(
-	cy: Core,
-	pairAdj: Map<string, Set<string>>,
-): void {
-	let partners: Array<{ id: string; offsetX: number; offsetY: number }> = [];
+function enableSpouseDrag(cy: Core, pairAdj: Map<string, Set<string>>): void {
+  let partners: Array<{ id: string; offsetX: number; offsetY: number }> = [];
 
-	cy.on("grab", "node", (evt) => {
-		const node = evt.target as cytoscape.NodeSingular;
-		const neighbors = pairAdj.get(node.id());
-		if (!neighbors?.size) {
-			partners = [];
-			return;
-		}
-		const np = node.position();
-		partners = [];
-		for (const pid of neighbors) {
-			const partner = cy.getElementById(pid);
-			if (!partner.length) continue;
-			const pp = partner.position();
-			partners.push({
-				id: pid,
-				offsetX: pp.x - np.x,
-				offsetY: pp.y - np.y,
-			});
-		}
-	});
+  cy.on('grab', 'node', (evt) => {
+    const node = evt.target as cytoscape.NodeSingular;
+    const neighbors = pairAdj.get(node.id());
+    if (!neighbors?.size) {
+      partners = [];
+      return;
+    }
+    const np = node.position();
+    partners = [];
+    for (const pid of neighbors) {
+      const partner = cy.getElementById(pid);
+      if (!partner.length) continue;
+      const pp = partner.position();
+      partners.push({
+        id: pid,
+        offsetX: pp.x - np.x,
+        offsetY: pp.y - np.y,
+      });
+    }
+  });
 
-	cy.on("drag", "node", (evt) => {
-		if (partners.length === 0) return;
-		const dragged = evt.target as cytoscape.NodeSingular;
-		const np = dragged.position();
-		for (const p of partners) {
-			cy.getElementById(p.id).position({
-				x: np.x + p.offsetX,
-				y: np.y + p.offsetY,
-			});
-		}
-	});
+  cy.on('drag', 'node', (evt) => {
+    if (partners.length === 0) return;
+    const dragged = evt.target as cytoscape.NodeSingular;
+    const np = dragged.position();
+    for (const p of partners) {
+      cy.getElementById(p.id).position({
+        x: np.x + p.offsetX,
+        y: np.y + p.offsetY,
+      });
+    }
+  });
 
-	cy.on("free", "node", () => {
-		partners = [];
-	});
+  cy.on('free', 'node', () => {
+    partners = [];
+  });
 }
 
 function addPath(
-	parent: SVGGElement,
-	d: string,
-	stroke: string,
-	strokeWidth: number,
+  parent: SVGGElement,
+  d: string,
+  stroke: string,
+  strokeWidth: number
 ): void {
-	const path = activeDocument.createElementNS(SVG_NS, "path");
-	path.setAttribute("d", d);
-	path.setAttribute("fill", "none");
-	path.setAttribute("stroke", stroke);
-	path.setAttribute("stroke-width", String(strokeWidth));
-	path.setAttribute("stroke-linecap", "square");
-	parent.appendChild(path);
+  const path = activeDocument.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', d);
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', stroke);
+  path.setAttribute('stroke-width', String(strokeWidth));
+  path.setAttribute('stroke-linecap', 'square');
+  parent.appendChild(path);
 }
 
 /**
@@ -328,59 +364,59 @@ function addPath(
  * interactive — we explicitly opt this group back in.
  */
 function addTextLabel(
-	parent: SVGGElement,
-	text: string,
-	x: number,
-	y: number,
-	fontSize: number,
-	onDblclick: (evt: MouseEvent) => void,
+  parent: SVGGElement,
+  text: string,
+  x: number,
+  y: number,
+  fontSize: number,
+  onDblclick: (evt: MouseEvent) => void
 ): void {
-	const group = activeDocument.createElementNS(SVG_NS, "g");
-	group.classList.add("family-connector-label");
-	// cursor: pointer and pointer-events: auto are in styles.css under
-	// .family-connector-label.
+  const group = activeDocument.createElementNS(SVG_NS, 'g');
+  group.classList.add('family-connector-label');
+  // cursor: pointer and pointer-events: auto are in styles.css under
+  // .family-connector-label.
 
-	// SVG has no text-measurement API without a render pass, so we estimate
-	// width from character count. 0.6em per char is a reasonable average for
-	// typical UI fonts, and the pill expands to a sensible minimum so single
-	// digits ("3") don't get a tiny pill.
-	const charW = fontSize * 0.6;
-	const padX = 4;
-	const padY = 2;
-	const w = Math.max(20, text.length * charW + padX * 2);
-	const h = fontSize + padY * 2;
+  // SVG has no text-measurement API without a render pass, so we estimate
+  // width from character count. 0.6em per char is a reasonable average for
+  // typical UI fonts, and the pill expands to a sensible minimum so single
+  // digits ("3") don't get a tiny pill.
+  const charW = fontSize * 0.6;
+  const padX = 4;
+  const padY = 2;
+  const w = Math.max(20, text.length * charW + padX * 2);
+  const h = fontSize + padY * 2;
 
-	const bg = activeDocument.createElementNS(SVG_NS, "rect");
-	bg.setAttribute("x", String(x - w / 2));
-	bg.setAttribute("y", String(y - h / 2));
-	bg.setAttribute("width", String(w));
-	bg.setAttribute("height", String(h));
-	bg.setAttribute("rx", "3");
-	bg.setAttribute("ry", "3");
-	bg.setAttribute("fill", "var(--background-primary)");
-	bg.setAttribute("fill-opacity", "0.92");
-	bg.setAttribute("stroke", "var(--background-modifier-border)");
-	bg.setAttribute("stroke-width", "1");
-	group.appendChild(bg);
+  const bg = activeDocument.createElementNS(SVG_NS, 'rect');
+  bg.setAttribute('x', String(x - w / 2));
+  bg.setAttribute('y', String(y - h / 2));
+  bg.setAttribute('width', String(w));
+  bg.setAttribute('height', String(h));
+  bg.setAttribute('rx', '3');
+  bg.setAttribute('ry', '3');
+  bg.setAttribute('fill', 'var(--background-primary)');
+  bg.setAttribute('fill-opacity', '0.92');
+  bg.setAttribute('stroke', 'var(--background-modifier-border)');
+  bg.setAttribute('stroke-width', '1');
+  group.appendChild(bg);
 
-	const t = activeDocument.createElementNS(SVG_NS, "text");
-	t.setAttribute("x", String(x));
-	t.setAttribute("y", String(y));
-	t.setAttribute("text-anchor", "middle");
-	t.setAttribute("dominant-baseline", "central");
-	t.setAttribute("font-size", String(fontSize));
-	t.setAttribute("font-weight", "500");
-	t.setAttribute("fill", "var(--text-normal)");
-	t.textContent = text;
-	group.appendChild(t);
+  const t = activeDocument.createElementNS(SVG_NS, 'text');
+  t.setAttribute('x', String(x));
+  t.setAttribute('y', String(y));
+  t.setAttribute('text-anchor', 'middle');
+  t.setAttribute('dominant-baseline', 'central');
+  t.setAttribute('font-size', String(fontSize));
+  t.setAttribute('font-weight', '500');
+  t.setAttribute('fill', 'var(--text-normal)');
+  t.textContent = text;
+  group.appendChild(t);
 
-	group.addEventListener("dblclick", (e) => {
-		e.preventDefault();
-		e.stopPropagation();
-		onDblclick(e);
-	});
+  group.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onDblclick(e);
+  });
 
-	parent.appendChild(group);
+  parent.appendChild(group);
 }
 
 /**
@@ -390,22 +426,22 @@ function addTextLabel(
  * visible 2.5px line.
  */
 function addHitZone(
-	parent: SVGGElement,
-	d: string,
-	onDblclick: (evt: MouseEvent) => void,
+  parent: SVGGElement,
+  d: string,
+  onDblclick: (evt: MouseEvent) => void
 ): void {
-	const path = activeDocument.createElementNS(SVG_NS, "path");
-	path.setAttribute("d", d);
-	path.setAttribute("fill", "none");
-	path.setAttribute("stroke", "transparent");
-	path.setAttribute("stroke-width", "14");
-	path.classList.add("relations-family-connector-hit-path");
-	// cursor: pointer and pointer-events: stroke (only the stroke catches
-	// clicks, not the empty fill area) come from the CSS class.
-	path.addEventListener("dblclick", (e) => {
-		e.preventDefault();
-		e.stopPropagation();
-		onDblclick(e);
-	});
-	parent.appendChild(path);
+  const path = activeDocument.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', d);
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'transparent');
+  path.setAttribute('stroke-width', '14');
+  path.classList.add('relations-family-connector-hit-path');
+  // cursor: pointer and pointer-events: stroke (only the stroke catches
+  // clicks, not the empty fill area) come from the CSS class.
+  path.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onDblclick(e);
+  });
+  parent.appendChild(path);
 }
