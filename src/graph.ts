@@ -5,8 +5,131 @@ import {
 	GraphEdge,
 	RelationsSettings,
 	RelationshipType,
+	ParsedLink,
+	AliasMap,
+	GraphBuildResult,
 } from "./types";
 import { GraphCache } from "./graph-cache";
+
+/**
+ * Parse a single link value from frontmatter into a ParsedLink.
+ * Handles three formats:
+ *   1. Plain text: "Alice" → target: "alice", displayName: "Alice"
+ *   2. Wikilink: "[[Alice]]" → target: "alice", displayName: "Alice"
+ *   3. Aliased: "[[Alice|Bobby]]" → target: "alice", displayName: "Bobby"
+ *
+ * Plain text is case-insensitive for vault lookup (target is lowercased),
+ * but preserves user's casing in displayName.
+ */
+export function parseLink(value: unknown): ParsedLink | null {
+	if (value == null) return null;
+	if (typeof value !== "string") return null;
+
+	const s = value.trim();
+	if (!s) return null;
+
+	// Try wikilink format: [[...]] (including empty [[]])
+	const wikiMatch = s.match(/^\[\[(.*?)\]\]$/);
+	if (wikiMatch) {
+		const content = wikiMatch[1].trim();
+		if (!content) return null;
+
+		// Check for pipe alias: "target|display"
+		const pipeIdx = content.indexOf("|");
+		if (pipeIdx >= 0) {
+			const target = content.slice(0, pipeIdx).trim();
+			let displayName = content.slice(pipeIdx + 1).trim();
+
+			// Validate both parts are non-empty
+			if (!target || !displayName) return null;
+
+			// Strip heading anchor from alias if present
+			const hashIdx = displayName.indexOf("#");
+			if (hashIdx >= 0) {
+				displayName = displayName.slice(0, hashIdx).trim();
+			}
+			if (!displayName) return null;
+
+			return {
+				target: normalizeNoteName(target),
+				displayName,
+				baseName: target,  // Preserve target name with case for extractLinkTargets
+				source: "wikilink-alias",
+			};
+		}
+
+		// No pipe: "[[Alice]]" or "[[Alice#section]]"
+		const hashIdx = content.indexOf("#");
+		const baseName = (hashIdx >= 0 ? content.slice(0, hashIdx) : content).trim();
+		if (baseName) {
+			return {
+				target: normalizeNoteName(baseName),
+				displayName: baseName,
+				baseName,  // For consistency with aliased links
+				source: "wikilink",
+			};
+		}
+	}
+
+	// Plain text: "Alice" or "alice"
+	const normalized = normalizeNoteName(s);
+	if (normalized) {
+		return {
+			target: normalized,
+			displayName: s,
+			baseName: s,
+			source: "plain-text",
+		};
+	}
+
+	return null;
+}
+
+/**
+ * Normalize a note name for case-insensitive comparison.
+ * Lowercases the input. Returns empty string if input is blank.
+ */
+export function normalizeNoteName(name: string): string {
+	return name.trim().toLowerCase();
+}
+
+/**
+ * Extract ParsedLink objects from a frontmatter value.
+ * Handles: single values, arrays, comma-separated strings, and nested arrays.
+ *
+ * Returns array of ParsedLink objects. Invalid entries are skipped.
+ */
+export function extractParsedLinks(value: unknown): ParsedLink[] {
+	if (value == null) return [];
+	if (Array.isArray(value)) {
+		return value.flatMap((v) => extractParsedLinks(v));
+	}
+	if (typeof value !== "string") return [];
+
+	const s = value.trim();
+	if (!s) return [];
+
+	// Check for wikilinks first
+	const wikiRegex = /\[\[([^\]]+)\]\]/g;
+	const wikiMatches = [...s.matchAll(wikiRegex)];
+	if (wikiMatches.length > 0) {
+		return wikiMatches
+			.map((m) => parseLink(`[[${m[1]}]]`))
+			.filter((p): p is ParsedLink => p !== null);
+	}
+
+	// No wikilinks: check for comma-separated plain text
+	if (s.includes(",")) {
+		return s
+			.split(",")
+			.map((part) => parseLink(part.trim()))
+			.filter((p): p is ParsedLink => p !== null);
+	}
+
+	// Single plain text value
+	const parsed = parseLink(s);
+	return parsed ? [parsed] : [];
+}
 
 /**
  * Remove edges whose relationship type is in `disabled`, then drop any node left
@@ -14,9 +137,7 @@ import { GraphCache } from "./graph-cache";
  * one) is always retained even if it becomes isolated, so the view never goes
  * empty on the very note you're looking at.
  *
- * Pure and side-effect-free — returns a new graph, leaving the input untouched —
- * so it's safe to apply to a cached graph without poisoning the cache. When
- * nothing is disabled it returns the original graph reference unchanged.
+ * Pure and side-effect-free — returns a new graph, leaving the input untouched.
  */
 export function filterGraphByTypes(
 	graph: RelationsGraph,
@@ -40,6 +161,9 @@ export function filterGraphByTypes(
 /**
  * Build the full relationship graph by scanning every markdown file in scope.
  *
+ * Returns both the graph structure and a per-direction alias map for
+ * context-aware display names. The graph is cached for performance.
+ *
  * If a `cache` is provided, it's consulted first — a hit returns the previously-
  * built graph immediately without rescanning the vault. On miss, the freshly-built
  * graph is stored. Callers that don't have a cache (or want to force a rebuild)
@@ -49,10 +173,12 @@ export function buildFullGraph(
 	app: App,
 	settings: RelationsSettings,
 	cache: GraphCache | null = null,
-): RelationsGraph {
+): GraphBuildResult {
+	const aliasMap: AliasMap = new Map();
+
 	if (cache) {
 		const hit = cache.get(settings);
-		if (hit) return hit;
+		if (hit) return { graph: hit, aliasMap };
 	}
 
 	const typeMap = buildTypeMap(settings);
@@ -74,35 +200,37 @@ export function buildFullGraph(
 
 		let hasAnyRelationship = false;
 
-		for (const key of Object.keys(fm)) {
-			const type = typeMap.get(key.toLowerCase());
-			if (!type) continue;
+		// Process relationship properties in alphabetical order so that when two
+		// properties alias the same target differently, precedence is deterministic
+		// (independent of the frontmatter's own YAML key order).
+		const relevantKeys = Object.keys(fm)
+			.filter((key) => typeMap.has(key.toLowerCase()))
+			.sort((a, b) => a.localeCompare(b));
 
-			const targets = extractLinkTargets(fm[key]);
-			for (const target of targets) {
-				const resolved = app.metadataCache.getFirstLinkpathDest(target, file.path);
+		for (const key of relevantKeys) {
+			const type = typeMap.get(key.toLowerCase())!;
+
+			const parsedLinks = extractParsedLinks(fm[key]);
+			for (const link of parsedLinks) {
+				// Resolve via Obsidian's own resolver using the case-preserved link path.
+				// getFirstLinkpathDest already handles case, duplicate basenames, and
+				// relative paths itself — feeding it a lowercased target would only
+				// fight that resolution.
+				const resolved = app.metadataCache.getFirstLinkpathDest(link.baseName ?? link.displayName, file.path);
 				if (!resolved) continue;
 				if (resolved.path === file.path) continue;
 				if (!inScope(resolved, settings)) continue;
 
-				// Genealogy edges are stored child→parent throughout the data
-				// model (matching a `parent: [[X]]` declaration written on the
-				// child's note). A declares-child type — `children: [[Kid]]`
-				// written on the PARENT's note — arrives parent→child, so swap
-				// it here at scan time. Everything downstream (family layouts,
-				// co-parent inference, the render-layer arrow inversion) assumes
-				// the child→parent convention. The type's own name is kept:
-				// rewriting to a synthetic type would break every by-name lookup
-				// (filtering, legend, symmetric handling, edge-label keys).
-				let edgeSource = file.path;
-				let edgeTarget = resolved.path;
+				let source = file.path;
+				let target = resolved.path;
+				// For genealogy types declared by parent (declaresChild), swap direction
+				// so edges are stored uniformly as child→parent
 				if (type.genealogy && type.declaresChild) {
-					[edgeSource, edgeTarget] = [edgeTarget, edgeSource];
+					[source, target] = [target, source];
 				}
-
 				rawEdges.push({
-					source: edgeSource,
-					target: edgeTarget,
+					source,
+					target,
 					type: type.name,
 					color: type.color,
 					symmetric: type.symmetric,
@@ -113,6 +241,22 @@ export function buildFullGraph(
 				hasAnyRelationship = true;
 				notePaths.add(file.path);
 				notePaths.add(resolved.path);
+
+				if (link.source === "wikilink-alias") {
+					// Keyed from file.path (not the potentially-swapped source) — the
+					// alias always describes how file.path refers to the target,
+					// regardless of which direction the edge itself is stored.
+					if (!aliasMap.has(file.path)) {
+						aliasMap.set(file.path, new Map());
+					}
+					const targetAliases = aliasMap.get(file.path)!;
+					// First property wins (relevantKeys is alphabetical, and links
+					// within one property are processed in declaration order) when
+					// two properties alias the same target differently.
+					if (!targetAliases.has(resolved.path)) {
+						targetAliases.set(resolved.path, link.displayName);
+					}
+				}
 			}
 		}
 
@@ -130,6 +274,11 @@ export function buildFullGraph(
 		}
 	}
 
+	// Deduplicate edges first, filtering to valid path combinations
+	const edges = dedupeEdges(rawEdges.filter(
+		(e) => notePaths.has(e.source) && notePaths.has(e.target),
+	));
+
 	const nodes: GraphNode[] = [];
 	for (const path of notePaths) {
 		const f = app.vault.getAbstractFileByPath(path);
@@ -138,13 +287,9 @@ export function buildFullGraph(
 		if (node) nodes.push(node);
 	}
 
-	const edges = dedupeEdges(rawEdges.filter(
-		(e) => notePaths.has(e.source) && notePaths.has(e.target),
-	));
-
-	const result = { nodes, edges };
-	if (cache) cache.set(settings, result);
-	return result;
+	const graph = { nodes, edges };
+	if (cache) cache.set(settings, graph);
+	return { graph, aliasMap };
 }
 
 /**
@@ -168,19 +313,18 @@ export function buildLocalGraph(
 	centerPath: string,
 	depth: number,
 	cache: GraphCache | null = null,
-): RelationsGraph {
-	const full = buildFullGraph(app, settings, cache);
+): GraphBuildResult {
+	const { graph: full, aliasMap } = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
-		// Center note isn't connected — return just it (if it exists) so the view can show "no relationships yet"
 		const f = app.vault.getAbstractFileByPath(centerPath);
 		if (f instanceof TFile) {
 			const node = buildNode(app, f, settings);
-			return { nodes: node ? [node] : [], edges: [] };
+			return { graph: { nodes: node ? [node] : [], edges: [] }, aliasMap };
 		}
-		return { nodes: [], edges: [] };
+		return { graph: { nodes: [], edges: [] }, aliasMap };
 	}
 
-	return localSubgraph(full, centerPath, depth);
+	return { graph: localSubgraph(full, centerPath, depth), aliasMap };
 }
 
 /**
@@ -246,10 +390,6 @@ export function localSubgraph(
 /**
  * Filter a graph to only the connected component containing centerPath.
  * Pure function — no app/vault access — for testability.
- *
- * If centerPath isn't a node in the graph, returns an empty graph.
- * Otherwise returns the subgraph of all nodes reachable from centerPath
- * (via any edge, treated as undirected) plus all edges between them.
  */
 export function connectedComponent(
 	graph: RelationsGraph,
@@ -284,53 +424,29 @@ export function connectedComponent(
 }
 
 /**
- * Build a graph containing every note reachable from a focus note via any
- * relationship edge. Equivalent to the connected component of the full graph
- * containing centerPath. No depth limit — walks until the queue is exhausted.
- *
- * Use case: a user looking at one character wants to see "everyone whose lives
- * touch theirs, however distantly," without including unrelated family trees
- * elsewhere in the vault. Different from `full` (which shows every note in
- * the vault including disconnected islands) and from `local` (which bounds
- * by hop count).
- *
- * Edge types are not filtered — any edge counts as a connection. A long
- * chain through friends-of-friends or mentor-of-rival will still be followed.
- * For tightly-bounded vaults this is the right thing; for vaults with lots
- * of weak side-relationships the connected component may grow large.
+ * Build a graph containing every note reachable from a focus note via any relationship edge.
  */
 export function buildConnectedGraph(
 	app: App,
 	settings: RelationsSettings,
 	centerPath: string,
 	cache: GraphCache | null = null,
-): RelationsGraph {
-	const full = buildFullGraph(app, settings, cache);
+): GraphBuildResult {
+	const { graph: full, aliasMap } = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
-		// Center note isn't part of any relationship — return just the focus note
-		// (if it exists on disk) so the view can render a "no relationships yet" state.
 		const f = app.vault.getAbstractFileByPath(centerPath);
 		if (f instanceof TFile) {
 			const node = buildNode(app, f, settings);
-			return { nodes: node ? [node] : [], edges: [] };
+			return { graph: { nodes: node ? [node] : [], edges: [] }, aliasMap };
 		}
-		return { nodes: [], edges: [] };
+		return { graph: { nodes: [], edges: [] }, aliasMap };
 	}
-	return connectedComponent(full, centerPath);
+	const filtered = connectedComponent(full, centerPath);
+	return { graph: filtered, aliasMap };
 }
 
 /**
- * Build a graph containing only the genealogy/partner neighbourhood of a focus
- * note: ancestors (transitively up the parent chain), descendants (transitively
- * down through children of children), and partners of anyone in that set.
- *
- * Used by family-graph mode. Without this, family-graph would show every
- * connected person in the vault — fine for "show me the whole dynasty" but
- * overwhelming when the user is looking at one character and just wants to see
- * who's their parent, who's their kid, and who their partners are.
- *
- * Allies, enemies, mentors etc. are dropped — those don't contribute to the
- * who-had-children-with-whom view that family-graph is for.
+ * Build a graph containing only the genealogy/partner neighbourhood of a focus note.
  */
 export function buildFamilyNeighborhood(
 	app: App,
@@ -338,19 +454,20 @@ export function buildFamilyNeighborhood(
 	focusPath: string,
 	depth?: number,
 	cache: GraphCache | null = null,
-): RelationsGraph {
-	const full = buildFullGraph(app, settings, cache);
+): GraphBuildResult {
+	const { graph: full, aliasMap } = buildFullGraph(app, settings, cache);
 
 	if (!full.nodes.some((n) => n.id === focusPath)) {
 		const f = app.vault.getAbstractFileByPath(focusPath);
 		if (f instanceof TFile) {
 			const node = buildNode(app, f, settings);
-			return { nodes: node ? [node] : [], edges: [] };
+			return { graph: { nodes: node ? [node] : [], edges: [] }, aliasMap };
 		}
-		return { nodes: [], edges: [] };
+		return { graph: { nodes: [], edges: [] }, aliasMap };
 	}
 
-	return filterFamilyNeighborhood(full, focusPath, depth);
+	const filtered = filterFamilyNeighborhood(full, focusPath, depth);
+	return { graph: filtered, aliasMap };
 }
 
 export function filterFamilyNeighborhood(
@@ -475,17 +592,6 @@ function buildNode(
 	return node;
 }
 
-/**
- * Generic frontmatter-string resolver used by the node-badge features
- * (top-left icon, top-right icon, subtext). Returns the trimmed string value
- * of the property, or undefined if any of: property name is blank, property
- * isn't set, the value is array-or-scalar coerces to empty.
- *
- * Coercion matches resolveRingColor for consistency: arrays take their first
- * element; non-string scalars (numbers, booleans) are stringified; whitespace
- * is trimmed. The badge layer renders the result as text — emoji, abbreviation,
- * short title, whatever the user typed.
- */
 export function resolveFrontmatterString(
 	frontmatter: Record<string, unknown> | undefined,
 	propertyName: string,
@@ -502,19 +608,6 @@ export function resolveFrontmatterString(
 	return value;
 }
 
-/**
- * Resolve the ring color for a node based on settings.ringColorProperty and
- * settings.ringColorRules. Returns the matched color, or undefined if no rule
- * applies (feature disabled, property missing, value doesn't match any rule).
- *
- * Frontmatter values come in as strings, arrays, numbers, or booleans — we
- * coerce to a single string and trim before comparing. Array-valued properties
- * use the first element (multi-value matching would need a different settings
- * shape to express). Comparison is case-sensitive on purpose: users typing
- * `Enemy` vs `enemy` may genuinely intend different categories, and we shouldn't
- * silently collapse them. Users who want case-insensitive matching can lowercase
- * their rule values.
- */
 export function resolveRingColor(
 	settings: RelationsSettings,
 	frontmatter: Record<string, unknown> | undefined,
@@ -538,15 +631,6 @@ export function resolveRingColor(
 	return undefined;
 }
 
-/**
- * Resolve the portrait image for a node.
- * Accepts:
- *   - "[[portrait.png]]"   wikilink to a vault image
- *   - "portrait.png"       vault path (relative or absolute)
- *   - "https://..."        external URL
- *   - "data:image/..."     data URL
- * Returns a resource URL Cytoscape can load, or null.
- */
 function resolveImage(
 	app: App,
 	file: TFile,
@@ -563,20 +647,16 @@ function resolveImage(
 	const v = value.trim();
 	if (!v) return null;
 
-	// External URL or data URL — pass through
 	if (/^(https?:|data:)/i.test(v)) return v;
 
-	// Wikilink form: [[file.png]] or [[file.png|alt]]
 	const wikiMatch = v.match(/^\[\[([^\]]+)\]\]$/);
 	const linkPath = wikiMatch ? stripAlias(wikiMatch[1]) : v;
 
-	// Resolve via Obsidian's link resolver (handles relative paths)
 	const resolved = app.metadataCache.getFirstLinkpathDest(linkPath, file.path);
 	if (resolved instanceof TFile) {
 		return app.vault.getResourcePath(resolved);
 	}
 
-	// Fallback: try as a literal vault path
 	const direct = app.vault.getAbstractFileByPath(normalizePath(linkPath));
 	if (direct instanceof TFile) {
 		return app.vault.getResourcePath(direct);
@@ -603,26 +683,13 @@ function hasRequiredTag(cache: CachedMetadata, requiredTags: string[]): boolean 
 }
 
 export function extractLinkTargets(value: unknown): string[] {
-	if (value == null) return [];
-	if (Array.isArray(value)) {
-		return value.flatMap((v) => extractLinkTargets(v));
-	}
-	if (typeof value !== "string") return [];
-
-	const s = value.trim();
-	if (!s) return [];
-
-	const wikiRegex = /\[\[([^\]]+)\]\]/g;
-	const matches = [...s.matchAll(wikiRegex)];
-	if (matches.length > 0) {
-		return matches.map((m) => stripAlias(m[1]));
-	}
-
-	if (s.includes(",")) {
-		return s.split(",").map((part) => stripAlias(part.trim())).filter(Boolean);
-	}
-
-	return [stripAlias(s)];
+	const parsed = extractParsedLinks(value);
+	return parsed.map((p) => {
+		// Return the target name with preserved case, not the alias
+		// For "[[Arthur]]", displayName is "Arthur" → return "Arthur"
+		// For "[[Arthur|King]]", baseName is "Arthur" → return "Arthur"
+		return p.baseName || p.displayName;
+	});
 }
 
 export function stripAlias(link: string): string {

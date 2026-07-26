@@ -190,6 +190,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		const hostFile = resolveHostFile(this.app, hostPath, this.sourcePath);
 
 		let graph;
+		let aliasMap;
 		let highlightId: string | undefined;
 
 		// Both `full` and `connected` override family-mode's automatic
@@ -205,16 +206,22 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				return;
 			}
 			const familyDepth = this.options.depthExplicit ? effectiveDepth : undefined;
-			graph = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache);
+			const result = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache);
+			graph = result.graph;
+			aliasMap = result.aliasMap;
 			highlightId = hostFile.path;
 		} else if (this.options.scope === "full") {
-			graph = buildFullGraph(this.app, this.settings, this.cache);
+			const result = buildFullGraph(this.app, this.settings, this.cache);
+			graph = result.graph;
+			aliasMap = result.aliasMap;
 		} else if (this.options.scope === "connected") {
 			if (!hostFile) {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for connected graph." });
 				return;
 			}
-			graph = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache);
+			const result = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache);
+			graph = result.graph;
+			aliasMap = result.aliasMap;
 			// `connected` normally has no hop limit — it walks the whole
 			// component. But an explicitly written `depth:` shouldn't be
 			// silently ignored, and mini embeds always force a compact 1-hop
@@ -228,7 +235,9 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for local graph." });
 				return;
 			}
-			graph = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache);
+			const result = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache);
+			graph = result.graph;
+			aliasMap = result.aliasMap;
 			highlightId = hostFile.path;
 		}
 
@@ -269,6 +278,8 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			// No room for a label editor in mini embeds, and double-click in a
 			// tiny graph is more likely to be an accident than intent.
 			editableLabels: effectiveSize !== "mini",
+			aliasMap,
+			centerPath: highlightId,
 		});
 
 		if (effectiveSize !== "mini") this.addLockControl(el);
