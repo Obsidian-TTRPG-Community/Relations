@@ -64,8 +64,8 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 				const block =
 					"```relations\n" +
 					"# size: small         # mini | small | large\n" +
-					"# depth: 1            # hops from this note (local scope)\n" +
-					"# scope: local        # local | full\n" +
+					"# depth: 1            # hops from this note (local scope; bounds connected scope when set)\n" +
+					"# scope: local        # local | connected | full\n" +
 					"# tree: false         # generic top-down dagre layout\n" +
 					"# family-graph: false # focused family view: parents above, partners level, children below\n" +
 					"# zoom: 1.0           # zoom multiplier; mini defaults to 1.4\n" +

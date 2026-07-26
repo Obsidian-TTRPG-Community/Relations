@@ -117,8 +117,8 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | Option        | Default                | Notes                                                                          |
 |---------------|------------------------|--------------------------------------------------------------------------------|
 | `size`        | `small`                | `mini` (~160px tall, infobox-friendly), `small` (~320px), `large` (~600px)    |
-| `depth`       | size-dependent         | hops from the focus note. `mini` is forced to 1; `small` defaults to 1; `large` defaults to 3 |
-| `scope`       | `local`                | `local` (this note + N hops) or `full` (entire vault)                          |
+| `depth`       | size-dependent         | hops from the focus note. `mini` is forced to 1; `small` defaults to 1; `large` defaults to 3. Only relationships reachable within `depth` hops are drawn — `depth: 1` is the focus note's own relationships (hub-and-spoke), cross-links between two outermost nodes wait until the next depth. An explicit `depth` also bounds `scope: connected` |
+| `scope`       | `local`                | `local` (this note + N hops), `connected` (everyone transitively linked to this note; bounded by `depth` if you set one) or `full` (entire vault) |
 | `tree`        | `false`                | generic top-down dagre layout for any graph — not family-specific              |
 | `family-graph`| `false`                | family view, **graph-style**: generation-aligned, drawn with Cytoscape edges (marriage / informal partnership / parent→child). [See below](#family-views). |
 | `family-tree` | `false`                | family view, **true tree**: generation-aligned, drawn with orthogonal right-angle connectors. [See below](#family-views). |

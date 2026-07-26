@@ -136,6 +136,14 @@ export function buildFullGraph(
  * Build a graph centered on a single file, expanding outward by `depth` hops.
  * BFS over the full graph's edge set.
  *
+ * Both nodes AND edges respect the hop limit. A node is included when it is
+ * within `depth` hops of the center; an edge is included only when it can be
+ * reached within `depth` hops — i.e. its nearer endpoint is strictly closer
+ * than `depth`. Traversing an edge from a node N hops out is hop N+1, so an
+ * edge between two nodes that are both exactly `depth` hops away is NOT shown:
+ * at depth 1 you see the center and its own relationships (hub-and-spoke),
+ * not the cross-links between the center's neighbors — those belong to depth 2.
+ *
  * The full graph is fetched via the same cache as `buildFullGraph` — local-graph
  * calls from multiple embeds on the same page reuse one scan.
  */
@@ -147,7 +155,6 @@ export function buildLocalGraph(
 	cache: GraphCache | null = null,
 ): RelationsGraph {
 	const full = buildFullGraph(app, settings, cache);
-	if (depth < 0) depth = 0;
 	if (!full.nodes.some((n) => n.id === centerPath)) {
 		// Center note isn't connected — return just it (if it exists) so the view can show "no relationships yet"
 		const f = app.vault.getAbstractFileByPath(centerPath);
@@ -155,6 +162,26 @@ export function buildLocalGraph(
 			const node = buildNode(app, f, settings);
 			return { nodes: node ? [node] : [], edges: [] };
 		}
+		return { nodes: [], edges: [] };
+	}
+
+	return localSubgraph(full, centerPath, depth);
+}
+
+/**
+ * Filter a graph to the neighborhood within `depth` hops of centerPath.
+ * Pure function — no app/vault access — for testability.
+ *
+ * See `buildLocalGraph` for the hop semantics: nodes at distance <= depth,
+ * edges whose nearer endpoint is at distance < depth.
+ */
+export function localSubgraph(
+	full: RelationsGraph,
+	centerPath: string,
+	depth: number,
+): RelationsGraph {
+	if (depth < 0) depth = 0;
+	if (!full.nodes.some((n) => n.id === centerPath)) {
 		return { nodes: [], edges: [] };
 	}
 
@@ -187,9 +214,16 @@ export function buildLocalGraph(
 
 	const includedPaths = new Set(visited.keys());
 	const nodes = full.nodes.filter((n) => includedPaths.has(n.id));
-	const edges = full.edges.filter(
-		(e) => includedPaths.has(e.source) && includedPaths.has(e.target),
-	);
+	// An edge is reachable in `depth` hops only if its nearer endpoint is
+	// closer than `depth` (crossing the edge is one more hop). This drops
+	// cross-links between two outermost-ring nodes, so depth 1 renders as
+	// hub-and-spoke instead of the full induced subgraph.
+	const edges = full.edges.filter((e) => {
+		const ds = visited.get(e.source);
+		const dt = visited.get(e.target);
+		if (ds === undefined || dt === undefined) return false;
+		return Math.min(ds, dt) < depth;
+	});
 
 	return { nodes, edges };
 }

@@ -332,8 +332,8 @@ export class RelationsSettingTab extends PluginSettingTab {
 		usage.setText(
 			"```relations\n" +
 			"size: small         # mini | small | large (mini is auto-selected inside callouts)\n" +
-			"depth: 1            # number of hops from this note (local scope; forced to 1 for mini)\n" +
-			"scope: local        # local | full\n" +
+			"depth: 1            # number of hops from this note (local scope; bounds connected scope when set; forced to 1 for mini)\n" +
+			"scope: local        # local | connected | full\n" +
 			"tree: false         # generic top-down dagre layout\n" +
 			"family-graph: false # focused family view: parents above, partners on the same row, children below\n" +
 			"zoom: 1.0           # zoom multiplier applied after fit. mini defaults to 1.4. 1.5 = 150%, etc.\n" +

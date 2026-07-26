@@ -1,7 +1,7 @@
 import { App, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, parseYaml, setIcon, TFile } from "obsidian";
 import { Core } from "cytoscape";
 import { RelationsSettings, PositionStore, EdgeLabelStore, RelationshipType } from "./types";
-import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes } from "./graph";
+import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes, localSubgraph } from "./graph";
 import { renderGraph, synthesizeInformalPartnerships, INFORMAL_PARTNERSHIP_LEGEND } from "./render";
 import { renderFilterPanel } from "./filter-panel";
 import type { GraphCache } from "./graph-cache";
@@ -215,6 +215,13 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				return;
 			}
 			graph = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache);
+			// `connected` normally has no hop limit — it walks the whole
+			// component. But an explicitly written `depth:` shouldn't be
+			// silently ignored, and mini embeds always force a compact 1-hop
+			// view, so in either case bound the component by depth.
+			if (this.options.depthExplicit || effectiveSize === "mini") {
+				graph = localSubgraph(graph, hostFile.path, effectiveDepth);
+			}
 			highlightId = hostFile.path;
 		} else {
 			if (!hostFile) {
