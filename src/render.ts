@@ -2,7 +2,7 @@ import { App, TFile, Menu } from "obsidian";
 import cytoscape, { Core, ElementDefinition, LayoutOptions } from "cytoscape";
 import fcose from "cytoscape-fcose";
 import dagre from "cytoscape-dagre";
-import { RelationsGraph, RelationsSettings, GraphEdge, RelationshipType, EdgeLabelStore, edgeLabelKey } from "./types";
+import { RelationsGraph, RelationsSettings, GraphEdge, RelationshipType, EdgeLabelStore, edgeLabelKey, GraphNode, AliasMap } from "./types";
 import { applyGenerationLayout } from "./family-tree";
 import { drawFamilyConnectors, OverlayLabelHooks } from "./family-connectors";
 import { setupNodeBadges } from "./node-badges";
@@ -43,6 +43,8 @@ export interface RenderOptions {
 	                            // store. Double-clicking an edge opens an inline editor.
 	editableLabels?: boolean;   // gate the double-click editor. Defaults to false. Set true in
 	                            // contexts with enough room (non-mini embeds, side panel).
+	aliasMap?: AliasMap;        // per-direction alias map for context-aware display names
+	centerPath?: string;        // the focus/host note path; used to resolve aliases from its perspective
 }
 
 interface ThemeColors {
@@ -102,6 +104,39 @@ function resolveTheme(host: HTMLElement): ThemeColors {
 }
 
 /**
+ * Resolve the display label for a node given an alias map and optional center/perspective.
+ *
+ * v1 precedence (context-aware display names):
+ *   1. If centerPath is set and the focus note has a direct alias for this node, use it
+ *   2. Otherwise, use the node's basename
+ *
+ * Example:
+ *   - Alice's node labeled "Alice", but Alice→Bob is aliased to "Bobby"
+ *   - In Alice's perspective view (centerPath="Alice"): Bob displays as "Bobby"
+ *   - In Bob's perspective view (centerPath="Bob"): Bob displays as "Bob" (his own label)
+ *
+ * Future extensions could add:
+ *   - Multiple perspective aliases: show A's alias in A-focused views, B's alias in B-focused views
+ *   - Fallback chain: if no direct alias, check inherited/relational aliases
+ *   - Global alias registry: a universal name visible everywhere (less context-aware)
+ *   - User preferences: let users choose which perspective to use when viewing
+ */
+export function resolveDisplayLabel(
+	nodeId: string,
+	node: GraphNode,
+	aliasMap?: AliasMap,
+	centerPath?: string,
+): string {
+	// v1 scope: only apply aliases from the center/focus note's perspective
+	if (centerPath && aliasMap?.has(centerPath)) {
+		const fromCenter = aliasMap.get(centerPath)!.get(nodeId);
+		if (fromCenter) return fromCenter;
+	}
+	// Fallback: use the node's baseline label (typically the file's basename)
+	return node.label;
+}
+
+/**
  * Measure pixel widths of node labels so the layout can space nodes proportionally
  * to their label sizes. Without this, long names ("Drakmir Axen, erster Sohn von
  * Mornak") visually overlap their neighbours because the layout treats every node as
@@ -119,6 +154,8 @@ function measureLabelWidths(
 	host: HTMLElement,
 	graph: RelationsGraph,
 	compact: boolean,
+	aliasMap?: AliasMap,
+	centerPath?: string,
 ): Map<string, number> {
 	const result = new Map<string, number>();
 	const fontSize = compact ? 10 : 13;
@@ -133,7 +170,9 @@ function measureLabelWidths(
 
 	try {
 		for (const n of graph.nodes) {
-			probe.textContent = n.label;
+			// Measure the perspective-aware label, not just the node's baseline label
+			const displayLabel = resolveDisplayLabel(n.id, n, aliasMap, centerPath);
+			probe.textContent = displayLabel;
 			result.set(n.id, Math.max(1, probe.offsetWidth));
 		}
 	} finally {
@@ -222,7 +261,7 @@ export function renderGraph(opts: RenderOptions): Core {
 		return labelStore.getLabel(edgeLabelKey(keySource, e.type, keyTarget, typeIsSymmetric(e))) ?? "";
 	};
 
-	const elements = toCytoscape(effectiveGraph, highlightId, lookupLabel);
+	const elements = toCytoscape(effectiveGraph, highlightId, lookupLabel, opts.aliasMap, opts.centerPath);
 	const theme = resolveTheme(container);
 
 	// Measure node label widths up-front so layouts can space nodes proportionally
@@ -232,7 +271,7 @@ export function renderGraph(opts: RenderOptions): Core {
 	// treated as the same width. When labels are hidden there's nothing to
 	// measure, so we use an empty map and the layout packs nodes by circle size.
 	const labelWidths = showLabels
-		? measureLabelWidths(container, effectiveGraph, !!compact)
+		? measureLabelWidths(container, effectiveGraph, !!compact, opts.aliasMap, opts.centerPath)
 		: new Map<string, number>();
 	// Stash on node data so the family-graph layout (which reads from the cy instance,
 	// not from `graph`) can access it cheaply via `node.data("labelWidth")`.
@@ -604,12 +643,18 @@ function toCytoscape(
 	graph: RelationsGraph,
 	highlightId?: string,
 	lookupLabel?: (e: GraphEdge) => string,
+	aliasMap?: AliasMap,
+	centerPath?: string,
 ): ElementDefinition[] {
 	const out: ElementDefinition[] = [];
 	for (const n of graph.nodes) {
+		// Resolve the perspective-aware label: an alias from the center note takes
+		// precedence, otherwise falls back to the node's baseline label.
+		const displayLabel = resolveDisplayLabel(n.id, n, aliasMap, centerPath);
+
 		const data: Record<string, unknown> = {
 			id: n.id,
-			label: n.label,
+			label: displayLabel,
 			image: n.image ?? "",
 			hasImage: n.image ? "true" : "false",
 			highlight: highlightId && n.id === highlightId ? "true" : "false",

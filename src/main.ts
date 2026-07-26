@@ -143,6 +143,8 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 				// genealogy default: only `parent` (case-insensitive) starts as true so
 				// existing users with a parent type still get a sensible family-graph view.
 				genealogy: partial.genealogy ?? (t.name.toLowerCase() === "parent"),
+				// declaresChild: new flag for genealogy types. Default false (child declares parent).
+				declaresChild: partial.declaresChild ?? false,
 				// Optional cosmetic legend group. The map reconstructs each type
 				// with an explicit field list, so this must be carried through or
 				// it would be silently dropped on every load.

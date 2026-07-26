@@ -94,7 +94,7 @@ describe("declaresChild normalization (issue #21)", () => {
 			{ path: "Parent.md", frontmatter: { children: ['[[Kid]]'] } },
 			{ path: "Kid.md", frontmatter: {} },
 		]);
-		const graph = buildFullGraph(app, settingsWith([genType("children", { declaresChild: true })]));
+		const { graph } = buildFullGraph(app, settingsWith([genType("children", { declaresChild: true })]));
 		expect(edgePairs(graph.edges)).toEqual(["Kid.md->Parent.md"]);
 	});
 
@@ -103,7 +103,7 @@ describe("declaresChild normalization (issue #21)", () => {
 			{ path: "Parent.md", frontmatter: { children: ['[[Kid]]'] } },
 			{ path: "Kid.md", frontmatter: {} },
 		]);
-		const graph = buildFullGraph(app, settingsWith([genType("children", { declaresChild: true })]));
+		const { graph } = buildFullGraph(app, settingsWith([genType("children", { declaresChild: true })]));
 		expect(graph.edges[0].type).toBe("children");
 	});
 
@@ -112,7 +112,7 @@ describe("declaresChild normalization (issue #21)", () => {
 			{ path: "A.md", frontmatter: { knows: ['[[B]]'] } },
 			{ path: "B.md", frontmatter: {} },
 		]);
-		const graph = buildFullGraph(
+		const { graph } = buildFullGraph(
 			app,
 			settingsWith([genType("knows", { genealogy: false, declaresChild: true })]),
 		);
@@ -124,7 +124,7 @@ describe("declaresChild normalization (issue #21)", () => {
 			{ path: "Kid.md", frontmatter: { parents: ['[[Parent]]'] } },
 			{ path: "Parent.md", frontmatter: {} },
 		]);
-		const graph = buildFullGraph(app, settingsWith([genType("parents")]));
+		const { graph } = buildFullGraph(app, settingsWith([genType("parents")]));
 		expect(edgePairs(graph.edges)).toEqual(["Kid.md->Parent.md"]);
 	});
 
@@ -133,7 +133,7 @@ describe("declaresChild normalization (issue #21)", () => {
 		// `parents: [[Amalayin]]` — one bond, one edge (issue #21's
 		// "redundant and conflicting edges").
 		const app = makeFakeApp(ISSUE_21_VAULT);
-		const graph = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
 		const between = graph.edges.filter(
 			(e) =>
 				(e.source === "Varinka.md" && e.target === "Amalayin.md") ||
@@ -148,7 +148,7 @@ describe("declaresChild normalization (issue #21)", () => {
 		// Twice is declared only by Varinka's `children:`; Twice.md itself has
 		// an empty parents array. Previously invisible to family views.
 		const app = makeFakeApp(ISSUE_21_VAULT);
-		const graph = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
 		expect(graph.nodes.map((n) => n.id).sort()).toEqual([
 			"Amalayin.md", "Twice.md", "Varinka.md",
 		]);
@@ -160,7 +160,7 @@ describe("declaresChild normalization (issue #21)", () => {
 
 	it("family neighborhood from the grandparent reaches the children-only grandchild", () => {
 		const app = makeFakeApp(ISSUE_21_VAULT);
-		const graph = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
 		const family = filterFamilyNeighborhood(graph, "Amalayin.md");
 		expect(family.nodes.map((n) => n.id).sort()).toEqual([
 			"Amalayin.md", "Twice.md", "Varinka.md",
@@ -171,14 +171,14 @@ describe("declaresChild normalization (issue #21)", () => {
 		// Issue #21's expected behaviour, stated directly: declaring from the
 		// parent side only, the child side only, or both sides must all yield
 		// the same nodes and edges.
-		const parentSideOnly = buildFullGraph(
+		const { graph: parentSideOnly } = buildFullGraph(
 			makeFakeApp([
 				{ path: "Amalayin.md", frontmatter: { children: ['[[Varinka]]'] } },
 				{ path: "Varinka.md", frontmatter: {} },
 			]),
 			settingsWith(ISSUE_21_TYPES),
 		);
-		const childSideOnly = buildFullGraph(
+		const { graph: childSideOnly } = buildFullGraph(
 			makeFakeApp([
 				{ path: "Amalayin.md", frontmatter: {} },
 				{ path: "Varinka.md", frontmatter: { parents: ['[[Amalayin]]'] } },

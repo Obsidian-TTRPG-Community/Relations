@@ -178,6 +178,7 @@ export class RelationsView extends ItemView {
 		if (!this.canvas) return;
 
 		let graph: RelationsGraph;
+		let aliasMap;
 		let highlightId: string | undefined;
 		let useTree = false;
 
@@ -187,10 +188,14 @@ export class RelationsView extends ItemView {
 				this.showEmpty("No active note. Open a note to see its relationships.");
 				return;
 			}
-			graph = buildLocalGraph(this.app, this.plugin.settings, active.path, this.currentLocalDepth, this.plugin.graphCache);
+			const result = buildLocalGraph(this.app, this.plugin.settings, active.path, this.currentLocalDepth, this.plugin.graphCache);
+			graph = result.graph;
+			aliasMap = result.aliasMap;
 			highlightId = active.path;
 		} else {
-			graph = buildFullGraph(this.app, this.plugin.settings, this.plugin.graphCache);
+			const result = buildFullGraph(this.app, this.plugin.settings, this.plugin.graphCache);
+			graph = result.graph;
+			aliasMap = result.aliasMap;
 		}
 
 		// Apply the type filter before measuring/rendering, so node counts, layout
@@ -232,6 +237,8 @@ export class RelationsView extends ItemView {
 			useTreeLayout: useTree,
 			labelStore: this.plugin,
 			editableLabels: true,
+			aliasMap,
+			centerPath: highlightId,
 		});
 
 		this.renderLegend();
