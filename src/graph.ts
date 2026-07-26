@@ -85,9 +85,24 @@ export function buildFullGraph(
 				if (resolved.path === file.path) continue;
 				if (!inScope(resolved, settings)) continue;
 
+				// Genealogy edges are stored child→parent throughout the data
+				// model (matching a `parent: [[X]]` declaration written on the
+				// child's note). A declares-child type — `children: [[Kid]]`
+				// written on the PARENT's note — arrives parent→child, so swap
+				// it here at scan time. Everything downstream (family layouts,
+				// co-parent inference, the render-layer arrow inversion) assumes
+				// the child→parent convention. The type's own name is kept:
+				// rewriting to a synthetic type would break every by-name lookup
+				// (filtering, legend, symmetric handling, edge-label keys).
+				let edgeSource = file.path;
+				let edgeTarget = resolved.path;
+				if (type.genealogy && type.declaresChild) {
+					[edgeSource, edgeTarget] = [edgeTarget, edgeSource];
+				}
+
 				rawEdges.push({
-					source: file.path,
-					target: resolved.path,
+					source: edgeSource,
+					target: edgeTarget,
 					type: type.name,
 					color: type.color,
 					symmetric: type.symmetric,
@@ -623,7 +638,16 @@ export function dedupeEdges(edges: GraphEdge[]): GraphEdge[] {
 	const out: GraphEdge[] = [];
 	for (const e of edges) {
 		let key: string;
-		if (e.symmetric) {
+		if (e.genealogy) {
+			// A parent-child bond is one fact no matter how many notes declare
+			// it or under which genealogy type name. After declares-child
+			// normalization, "Varinka declares `parents: [[Amalayin]]`" and
+			// "Amalayin declares `children: [[Varinka]]`" both arrive here as
+			// Varinka→Amalayin — but with different type names, which the
+			// per-type keys below would keep as two parallel edges (issue #21).
+			// Key genealogy edges on the directed pair alone; first wins.
+			key = `gen|${e.source}|${e.target}`;
+		} else if (e.symmetric) {
 			const [a, b] = [e.source, e.target].sort();
 			key = `sym|${e.type}|${a}|${b}`;
 		} else {

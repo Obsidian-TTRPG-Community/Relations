@@ -8,6 +8,14 @@ export interface RelationshipType {
 	treeLayout: boolean;      // when this type dominates a graph, switch to top-down dagre
 	lineStyle: LineStyle;     // edge line appearance
 	genealogy: boolean;       // counts as a bloodline edge for family-graph layout (e.g. parent)
+	// Declaration direction for genealogy types. Genealogy edges are stored
+	// child→parent internally, matching `parent: [[X]]`-style declarations
+	// written on the child's note. When a type is instead declared BY the
+	// parent — `children: [[Kid]]` — set declaresChild and the edge is swapped
+	// at scan time so the stored direction stays uniformly child→parent
+	// (issue #21: without this, children-declared kids vanish from family
+	// views or corrupt the tree). Ignored when genealogy is false.
+	declaresChild?: boolean;
 	// Optional grouping label. Purely cosmetic: types sharing a group are
 	// clustered under a heading in the legend (e.g. put `parent` and `family`
 	// in a "Family" group). Empty/undefined means ungrouped. Does not affect

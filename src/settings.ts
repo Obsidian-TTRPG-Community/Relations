@@ -357,6 +357,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 		header.createSpan({ text: "Pair", cls: "relations-types-header-cell" });
 		header.createSpan({ text: "Tree", cls: "relations-types-header-cell" });
 		header.createSpan({ text: "Gen", cls: "relations-types-header-cell" });
+		header.createSpan({ text: "Child", cls: "relations-types-header-cell" });
 		header.createSpan({ text: "Line", cls: "relations-types-header-cell" });
 		header.createSpan({ text: "", cls: "relations-types-header-cell" });
 
@@ -399,11 +400,11 @@ export class RelationsSettingTab extends PluginSettingTab {
 			});
 
 			const makeCheckbox = (
-				key: "symmetric" | "pair" | "treeLayout" | "genealogy",
+				key: "symmetric" | "pair" | "treeLayout" | "genealogy" | "declaresChild",
 				title: string,
 			): HTMLInputElement => {
 				const cb = row.createEl("input", { type: "checkbox", cls: "relations-types-cb" });
-				cb.checked = rt[key];
+				cb.checked = rt[key] ?? false;
 				cb.title = title;
 				cb.addEventListener("change", () => {
 					void (async () => {
@@ -419,6 +420,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 			makeCheckbox("pair",      "Pair — pull these nodes very close (e.g. spouse)");
 			makeCheckbox("treeLayout","Tree — lay out top-down when this type dominates");
 			makeCheckbox("genealogy", "Genealogy — bloodline edge for family-graph mode");
+			makeCheckbox("declaresChild", "Child — this property is written on the PARENT's note and names the child (e.g. `children:`). Only used when Gen is on; edges are stored child→parent either way, so both sides of a bond can be declared without duplicates.");
 
 			// Line style dropdown
 			const lineSelect = row.createEl("select", { cls: "relations-types-linestyle" });

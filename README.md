@@ -253,6 +253,7 @@ Configure types in **Settings → Relations**. Each type has a name (= frontmatt
 | **Pair**     | Pulls paired nodes very close, with a heavy connector. Use for `spouse`, `partner`, `bonded`.                            |
 | **Tree**     | When this type dominates a graph (≥60% of edges), auto-switches to top-down layout.                                       |
 | **Gen**      | Genealogy — counts as a bloodline edge in the family views (`family-tree` / `family-graph`). Typically `parent`. |
+| **Child**    | For Gen types only: this property is written on the **parent's** note and names the child (e.g. a `children:` property). Relations flips the edge internally so it doesn't matter which side of a bond is declared — parent-side, child-side, or both produce the same tree, and a bond declared from both sides draws as a single line. |
 | **Line**     | `solid`, `dashed`, `dotted`, or `double`. Useful for marking "secret", "former", "rumored" relationships.               |
 
 Defaults shipped:

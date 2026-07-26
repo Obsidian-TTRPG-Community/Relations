@@ -62,6 +62,9 @@ function hashSettings(s: RelationsSettings): string {
 			p: t.pair,
 			t: t.treeLayout,
 			g: t.genealogy,
+			// declaresChild flips stored edge direction at scan time, so toggling
+			// it must rebuild the graph.
+			dc: t.declaresChild ?? false,
 			// color and lineStyle are cosmetic — they don't affect what edges exist,
 			// only how they're drawn. Excluding them means recolouring a type doesn't
 			// trigger a vault rescan.
