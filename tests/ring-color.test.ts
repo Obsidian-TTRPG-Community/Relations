@@ -42,6 +42,7 @@ function makeSettings(
 		bottomLeftIconProperty: "",
 		bottomRightIconProperty: "",
 		subtextProperty: "",
+		phantomPlaceholderImage: "",
 	};
 }
 

@@ -17,3 +17,4 @@ coverage/
 
 # Note: main.js, manifest.json, styles.css are intentionally tracked —
 # the repo ships them and BRAT/manual installs read them.
+.prettierrc

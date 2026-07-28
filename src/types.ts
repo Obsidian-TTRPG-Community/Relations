@@ -92,6 +92,10 @@ export interface RelationsSettings {
 	bottomLeftIconProperty: string;
 	bottomRightIconProperty: string;
 	subtextProperty: string;
+
+	// Vault path to the image shown on phantom nodes (unresolved link targets
+	// with no matching file). Empty = phantom nodes render with no image.
+	phantomPlaceholderImage: string;
 }
 
 export const DEFAULT_SETTINGS: RelationsSettings = {
@@ -134,6 +138,7 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 	bottomLeftIconProperty: "",
 	bottomRightIconProperty: "",
 	subtextProperty: "",
+	phantomPlaceholderImage: "",
 };
 
 // Internal model
@@ -158,6 +163,9 @@ export interface GraphNode {
 	bottomLeftIcon?: string;
 	bottomRightIcon?: string;
 	subtext?: string;
+	// True when this node stands in for an unresolved link target rather than
+	// an actual file — see buildFullGraph's phantom-node handling in graph.ts.
+	isPhantom?: boolean;
 }
 
 export interface GraphEdge {
