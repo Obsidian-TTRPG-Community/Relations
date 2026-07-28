@@ -187,20 +187,23 @@ export class RelationsView extends ItemView {
 				this.showEmpty("No active note. Open a note to see its relationships.");
 				return;
 			}
+			// buildLocalGraph applies the disabled-types filter internally, before
+			// the hop-limited neighborhood is walked, so a note reachable only via
+			// a disabled-type edge is excluded entirely rather than surfacing as an
+			// orphan kept alive by some other edge of its own.
 			graph = buildLocalGraph(this.app, this.plugin.settings, active.path, this.currentLocalDepth, this.plugin.graphCache);
 			highlightId = active.path;
 		} else {
+			// `full` has no hop-limiting to worry about, so filtering order doesn't
+			// matter — apply the type filter here before measuring/rendering, so
+			// node counts, layout and the subtitle reflect only what's shown.
 			graph = buildFullGraph(this.app, this.plugin.settings, this.plugin.graphCache);
+			graph = filterGraphByTypes(
+				graph,
+				new Set(this.plugin.settings.disabledTypes),
+				highlightId,
+			);
 		}
-
-		// Apply the type filter before measuring/rendering, so node counts, layout
-		// and the subtitle reflect only what's actually shown. The active note
-		// (local mode) is kept even if filtering would otherwise isolate it.
-		graph = filterGraphByTypes(
-			graph,
-			new Set(this.plugin.settings.disabledTypes),
-			highlightId,
-		);
 
 		if (this.mode === "local") {
 			const active = this.app.workspace.getActiveFile();

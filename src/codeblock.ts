@@ -205,20 +205,29 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				return;
 			}
 			const familyDepth = this.options.depthExplicit ? effectiveDepth : undefined;
+			// buildFamilyNeighborhood applies the disabled-types filter internally,
+			// before the genealogy walk, so a hidden type can't pull an
+			// otherwise-invisible ancestor/descendant into the neighborhood.
 			graph = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache);
 			highlightId = hostFile.path;
 		} else if (this.options.scope === "full") {
 			graph = buildFullGraph(this.app, this.settings, this.cache);
+			// `full` has no hop-limiting to worry about, so filtering order
+			// doesn't matter — apply it here same as before.
+			graph = filterGraphByTypes(graph, new Set(this.settings.disabledTypes), highlightId);
 		} else if (this.options.scope === "connected") {
 			if (!hostFile) {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for connected graph." });
 				return;
 			}
+			// buildConnectedGraph applies the disabled-types filter internally,
+			// before the component is walked (see its JSDoc).
 			graph = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache);
 			// `connected` normally has no hop limit — it walks the whole
 			// component. But an explicitly written `depth:` shouldn't be
 			// silently ignored, and mini embeds always force a compact 1-hop
-			// view, so in either case bound the component by depth.
+			// view, so in either case bound the (already-filtered) component by
+			// depth.
 			if (this.options.depthExplicit || effectiveSize === "mini") {
 				graph = localSubgraph(graph, hostFile.path, effectiveDepth);
 			}
@@ -228,13 +237,11 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for local graph." });
 				return;
 			}
+			// buildLocalGraph applies the disabled-types filter internally, before
+			// the hop-limited neighborhood is walked (see its JSDoc).
 			graph = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache);
 			highlightId = hostFile.path;
 		}
-
-		// Honour the global type filter (shared with the side-panel view). The
-		// host/center note is kept even if filtering would otherwise isolate it.
-		graph = filterGraphByTypes(graph, new Set(this.settings.disabledTypes), highlightId);
 
 		if (graph.nodes.length === 0) {
 			canvas.createDiv({
