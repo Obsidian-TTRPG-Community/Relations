@@ -445,7 +445,7 @@ function buildTypeMap(settings: RelationsSettings): Map<string, RelationshipType
 	return m;
 }
 
-function buildNode(
+export function buildNode(
 	app: App,
 	file: TFile,
 	settings: RelationsSettings,

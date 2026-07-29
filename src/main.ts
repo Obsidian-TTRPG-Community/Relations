@@ -68,6 +68,8 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 					"# scope: local        # local | connected | full\n" +
 					"# tree: false         # generic top-down dagre layout\n" +
 					"# family-graph: false # focused family view: parents above, partners level, children below\n" +
+					"# org-graph: Hierarchy # render a settings-defined organization hierarchy, force-directed\n" +
+				"# org-tree: Hierarchy  # same, but top-down layout\n" +
 					"# zoom: 1.0           # zoom multiplier; mini defaults to 1.4\n" +
 					"# height: 400px       # override embed height. px, em, rem, vh, vw, %\n" +
 					"# spacing: 1.0        # family-graph node spacing; <1 tighter, >1 looser\n" +
@@ -167,6 +169,16 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 		}
 		if (typeof this.settings.showNodeLabels !== "boolean") {
 			this.settings.showNodeLabels = DEFAULT_SETTINGS.showNodeLabels;
+		}
+		// organizationHierarchies: older settings won't have it; fall back to the
+		// default ("Party Structure"). Also drop malformed entries (missing name
+		// or fewer than 2 levels) rather than letting them crash the settings UI.
+		if (!Array.isArray(this.settings.organizationHierarchies)) {
+			this.settings.organizationHierarchies = DEFAULT_SETTINGS.organizationHierarchies;
+		} else {
+			this.settings.organizationHierarchies = this.settings.organizationHierarchies.filter(
+				(h) => h && typeof h.name === "string" && h.name.trim() && Array.isArray(h.levels) && h.levels.length >= 2,
+			);
 		}
 	}
 

@@ -26,6 +26,42 @@ export interface RelationshipType {
 export type GraphMode = "full" | "local";
 
 /**
+ * One rank in a user-defined organization hierarchy (e.g. "Party Structure":
+ * 1=Leader, 2=Officers, 3=Members, 4=Initiates). `level` is a positive integer;
+ * gaps are allowed (1, 2, 5) and levels are always displayed sorted by number
+ * regardless of entry/storage order. `name` is converted to a frontmatter field
+ * name via toFieldName() in organization-hierarchies.ts (e.g. "Guild Masters" →
+ * "guild_masters") — that's the property a Group note's frontmatter must use to
+ * list members at this level.
+ */
+export interface OrganizationLevel {
+	level: number;
+	name: string;
+	// Hex color for this level's legend swatch and rendered nodes (ring color on
+	// a single-member level, fill color on a multi-member level's hub node).
+	// Optional so hierarchies predating this field still load; missing colors
+	// fall back to a default palette by level position — see defaultLevelColor
+	// in organization-hierarchies.ts.
+	color?: string;
+	// Line style for the connector edge from this level up to the level above
+	// it (e.g. dashed to mark an "acting"/provisional rank). Mirrors
+	// RelationshipType.lineStyle. Optional; missing values render solid.
+	lineStyle?: LineStyle;
+}
+
+/**
+ * A user-defined organization hierarchy, configured in settings and referenced
+ * by Group notes via a `relations` code block's `org:` parameter. Distinct from
+ * relationshipTypes: hierarchies describe rank structure within a single group
+ * note (frontmatter fields named after each level), not relationships between
+ * notes.
+ */
+export interface OrganizationHierarchy {
+	name: string;
+	levels: OrganizationLevel[];
+}
+
+/**
  * One rule in the ring-color mapping: when a node's value of the configured
  * frontmatter property equals `value` (string-compared, trimmed, case-sensitive),
  * the node's outer ring renders in `color`. No match means no ring color.
@@ -92,6 +128,11 @@ export interface RelationsSettings {
 	bottomLeftIconProperty: string;
 	bottomRightIconProperty: string;
 	subtextProperty: string;
+
+	// User-defined organization hierarchies (rank structures like "Party
+	// Structure" or "Guild Ranks"). Referenced by Group notes via a `relations`
+	// code block's `org:` parameter — see organization-hierarchies.ts.
+	organizationHierarchies: OrganizationHierarchy[];
 }
 
 export const DEFAULT_SETTINGS: RelationsSettings = {
@@ -134,6 +175,17 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 	bottomLeftIconProperty: "",
 	bottomRightIconProperty: "",
 	subtextProperty: "",
+	organizationHierarchies: [
+		{
+			name: "Hierarchy",
+			levels: [
+				{ level: 1, name: "Leader", color: "#dc2626", lineStyle: "solid" },
+				{ level: 2, name: "Officers", color: "#3b82f6", lineStyle: "solid" },
+				{ level: 3, name: "Members", color: "#22c55e", lineStyle: "solid" },
+				{ level: 4, name: "Initiates", color: "#eab308", lineStyle: "solid" },
+			],
+		},
+	],
 };
 
 // Internal model
@@ -158,6 +210,12 @@ export interface GraphNode {
 	bottomLeftIcon?: string;
 	bottomRightIcon?: string;
 	subtext?: string;
+	// Solid background fill color, used by organization-hierarchy rendering for
+	// synthetic "level hub" nodes (e.g. the "Officers" node representing a rank
+	// with multiple members) that have no portrait image of their own. Undefined
+	// means "use the theme's default node background" — real person-nodes never
+	// set this, so portraits are unaffected.
+	fillColor?: string;
 }
 
 export interface GraphEdge {
