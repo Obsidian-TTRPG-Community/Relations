@@ -418,7 +418,7 @@
 .relations-types-header,
 .relations-types-row {
 	display: grid;
-	grid-template-columns: 1fr 0.7fr 50px 50px 50px 50px 50px 90px 32px;
+	grid-template-columns: 1fr 0.7fr 50px 50px 50px 50px 50px 50px 90px 32px;
 	gap: 8px;
 	align-items: center;
 	padding: 4px 0;
