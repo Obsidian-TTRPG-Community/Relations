@@ -1,5 +1,7 @@
-import { App, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
+import { App, Modal, PluginSettingTab, Setting, ButtonComponent, Notice } from "obsidian";
 import type RelationsPlugin from "./main";
+import type { LineStyle } from "./types";
+import { isHierarchyNameTaken, sortedLevels, defaultLevelColor, LevelDraft, validateLevels } from "./organization-hierarchies";
 
 export class RelationsSettingTab extends PluginSettingTab {
 	private plugin: RelationsPlugin;
@@ -327,6 +329,75 @@ export class RelationsSettingTab extends PluginSettingTab {
 					this.plugin.refreshGraphView();
 				}));
 
+		// -----------------------------------------------------------------
+		// Organization hierarchies: user-defined rank structures (e.g. "Party
+		// Structure": Leader/Officers/Members/Initiates) for Group notes. A
+		// hierarchy's level names become the frontmatter field names a Group
+		// note lists members under; a `relations` code block then renders that
+		// structure with `org-graph:`/`org-tree: <hierarchy name>`.
+		// -----------------------------------------------------------------
+		new Setting(containerEl).setName("Organization hierarchies").setHeading();
+		const orgHelp = containerEl.createDiv({ cls: "setting-item-description" });
+		orgHelp.createEl("p", {
+			text: "Define custom rank structures for Group notes — e.g. a \"Party Structure\" of Leader/Officers/Members/Initiates, or a guild's Master/Journeyman/Apprentice ranks. Each level's name becomes a frontmatter field a Group note lists members under.",
+		});
+		{
+			const p = orgHelp.createEl("p");
+			p.appendText("Example: level ");
+			p.createEl("code", { text: "Officers" });
+			p.appendText(" becomes the frontmatter field ");
+			p.createEl("code", { text: "officers" });
+			p.appendText(". Render it with ");
+			p.createEl("code", { text: "org-graph: Party Structure" });
+			p.appendText(" or ");
+			p.createEl("code", { text: "org-tree: Party Structure" });
+			p.appendText(" in a relations code block.");
+		}
+		const orgHelpList = orgHelp.createEl("ul", { cls: "relations-help-list" });
+		const addOrgHelpItem = (label: string, body: string): void => {
+			const li = orgHelpList.createEl("li");
+			li.createEl("strong", { text: label });
+			li.appendText(` — ${body}`);
+		};
+		addOrgHelpItem("Level", "position in the hierarchy (1 = top). Gaps are fine — levels always display sorted by number.");
+		addOrgHelpItem("Name", "becomes the frontmatter field a Group note lists members under (e.g. \"Officers\" → officers).");
+		addOrgHelpItem("Color", "legend swatch color; also the ring color when a level collapses to one member, or the hub node's fill color when it has several.");
+		addOrgHelpItem("Line", "solid / dashed / dotted / double. Styles the connector from this level up to the level above it.");
+
+		const orgList = containerEl.createDiv();
+		this.renderHierarchyList(orgList);
+
+		new Setting(containerEl)
+			.addButton((b: ButtonComponent) => b
+				.setButtonText("Add hierarchy")
+				.setCta()
+				.onClick(() => {
+					new HierarchyNameModal(this.app, (name) => {
+						if (isHierarchyNameTaken(this.plugin.settings, name)) {
+							new Notice(`A hierarchy named "${name}" already exists.`);
+							return;
+						}
+						new HierarchyLevelsModal(
+							this.app,
+							name,
+							[
+								{ level: 1, name: "", color: defaultLevelColor(0), lineStyle: "solid" },
+								{ level: 2, name: "", color: defaultLevelColor(1), lineStyle: "solid" },
+							],
+							false,
+							(candidate) => isHierarchyNameTaken(this.plugin.settings, candidate),
+							(finalName, levels) => {
+								void (async () => {
+									this.plugin.settings.organizationHierarchies.push({ name: finalName, levels });
+									await this.plugin.saveSettings();
+									this.redisplay();
+									this.plugin.refreshGraphView();
+								})();
+							},
+						).open();
+					}).open();
+				}));
+
 		new Setting(containerEl).setName("Code block syntax").setHeading();
 		const usage = containerEl.createEl("pre", { cls: "relations-help-pre" });
 		usage.setText(
@@ -336,6 +407,8 @@ export class RelationsSettingTab extends PluginSettingTab {
 			"scope: local        # local | connected | full\n" +
 			"tree: false         # generic top-down dagre layout\n" +
 			"family-graph: false # focused family view: parents above, partners on the same row, children below\n" +
+			"org-graph: Hierarchy # organization hierarchy (see above), force-directed layout\n" +
+			"org-tree: Hierarchy  # same, but top-down layout\n" +
 			"zoom: 1.0           # zoom multiplier applied after fit. mini defaults to 1.4. 1.5 = 150%, etc.\n" +
 			"height: 800px       # override the size's default height. Accepts px, em, rem, vh, vw, %.\n" +
 			"spacing: 1.0        # family-graph node spacing; <1 tighter (infoboxes), >1 looser\n" +
@@ -343,6 +416,74 @@ export class RelationsSettingTab extends PluginSettingTab {
 			"# center: \"[[Other Note]]\"      # override the focus note\n" +
 			"```",
 		);
+	}
+
+	/**
+	 * Render the configured hierarchies as a list of (name, level summary, Edit,
+	 * Delete) rows. Mirrors renderTypeList/renderRingColorList in structure.
+	 */
+	private renderHierarchyList(container: HTMLElement): void {
+		container.empty();
+
+		const hierarchies = this.plugin.settings.organizationHierarchies;
+		if (hierarchies.length === 0) {
+			const empty = container.createDiv({ cls: "setting-item-description" });
+			empty.setText("No hierarchies yet. Click \"Add hierarchy\" below to create one.");
+			return;
+		}
+
+		hierarchies.forEach((h, idx) => {
+			const row = container.createDiv({ cls: "relations-org-hierarchy-row" });
+
+			const info = row.createDiv({ cls: "relations-org-hierarchy-info" });
+			info.createEl("strong", { text: h.name });
+			const summary = info.createDiv({ cls: "relations-org-hierarchy-summary" });
+			sortedLevels(h).forEach((l, i) => {
+				const chip = summary.createSpan({ cls: "relations-org-level-chip" });
+				const swatch = chip.createSpan({ cls: "relations-org-level-swatch" });
+				swatch.style.setProperty("--org-swatch-color", l.color || defaultLevelColor(i));
+				chip.appendText(`${l.level}=${l.name}`);
+			});
+
+			const actions = row.createDiv({ cls: "relations-org-hierarchy-actions" });
+
+			const editBtn = actions.createEl("button", { text: "Edit" });
+			editBtn.addEventListener("click", () => {
+				new HierarchyLevelsModal(
+					this.app,
+					h.name,
+					sortedLevels(h).map((l, i) => ({
+						level: l.level,
+						name: l.name,
+						color: l.color || defaultLevelColor(i),
+						lineStyle: l.lineStyle || "solid",
+					})),
+					true,
+					(candidate) => isHierarchyNameTaken(this.plugin.settings, candidate, idx),
+					(finalName, levels) => {
+						void (async () => {
+							this.plugin.settings.organizationHierarchies[idx] = { name: finalName, levels };
+							await this.plugin.saveSettings();
+							this.plugin.graphCache.invalidate();
+							this.redisplay();
+							this.plugin.refreshGraphView();
+						})();
+					},
+				).open();
+			});
+
+			const removeBtn = actions.createEl("button", { text: "✕", cls: "relations-types-remove" });
+			removeBtn.title = "Delete hierarchy";
+			removeBtn.addEventListener("click", () => {
+				void (async () => {
+					this.plugin.settings.organizationHierarchies.splice(idx, 1);
+					await this.plugin.saveSettings();
+					this.plugin.graphCache.invalidate();
+					this.redisplay();
+					this.plugin.refreshGraphView();
+				})();
+			});
+		});
 	}
 
 	private renderTypeList(container: HTMLElement): void {
@@ -538,4 +679,212 @@ function findScrollContainer(start: HTMLElement): HTMLElement | null {
 		el = el.parentElement;
 	}
 	return null;
+}
+
+/**
+ * Step 1 of creating a new hierarchy: just the name. Kept separate from the
+ * level builder (HierarchyLevelsModal) so the level-builder's header can read
+ * `Define levels for "<name>"` — matching the spec's two-modal flow.
+ */
+export class HierarchyNameModal extends Modal {
+	private name = "";
+
+	constructor(app: App, private onSubmit: (name: string) => void) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "New organization hierarchy" });
+
+		new Setting(contentEl)
+			.setName("Organization name")
+			.addText((t) => {
+				t.setPlaceholder("e.g. Party Structure")
+					.onChange((v) => { this.name = v; });
+				t.inputEl.addEventListener("keydown", (e) => {
+					if (e.key === "Enter") {
+						e.preventDefault();
+						this.trySubmit();
+					}
+				});
+				window.setTimeout(() => t.inputEl.focus(), 0);
+			});
+
+		new Setting(contentEl)
+			.addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
+			.addButton((b) => b.setButtonText("Create").setCta().onClick(() => this.trySubmit()));
+	}
+
+	private trySubmit(): void {
+		const trimmed = this.name.trim();
+		if (!trimmed) {
+			new Notice("Enter a name for the hierarchy.");
+			return;
+		}
+		this.close();
+		this.onSubmit(trimmed);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+/**
+ * Step 2: the level builder. Handles both "create" (name fixed from step 1,
+ * shown read-only in the header) and "edit" (name editable inline) via the
+ * `editableName` flag. Levels can be added, removed, and renumbered freely;
+ * duplicate level numbers get an inline error on blur, and Save re-validates
+ * everything (see validateLevels) so a bad state can't be persisted.
+ */
+export class HierarchyLevelsModal extends Modal {
+	private name: string;
+	private levels: LevelDraft[];
+
+	constructor(
+		app: App,
+		initialName: string,
+		initialLevels: LevelDraft[],
+		private editableName: boolean,
+		private isNameTaken: (name: string) => boolean,
+		private onSave: (name: string, levels: { level: number; name: string; color: string; lineStyle: LineStyle }[]) => void,
+	) {
+		super(app);
+		this.name = initialName;
+		this.levels = initialLevels.length > 0
+			? initialLevels.map((l) => ({ ...l }))
+			: [
+				{ level: 1, name: "", color: defaultLevelColor(0), lineStyle: "solid" },
+				{ level: 2, name: "", color: defaultLevelColor(1), lineStyle: "solid" },
+			];
+	}
+
+	onOpen(): void {
+		this.render();
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+
+	private render(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("h2", { text: `Define levels for "${this.name}"` });
+
+		if (this.editableName) {
+			new Setting(contentEl)
+				.setName("Organization name")
+				.addText((t) => t
+					.setValue(this.name)
+					.onChange((v) => { this.name = v; }));
+		}
+
+		const help = contentEl.createDiv({ cls: "setting-item-description" });
+		help.setText("Each level needs a number and a name. Levels display sorted by number — gaps (1, 2, 5) are fine, but each number can only be used once.");
+
+		const rows = contentEl.createDiv({ cls: "relations-org-levels" });
+		this.renderRows(rows);
+
+		new Setting(contentEl)
+			.addButton((b) => b
+				.setButtonText("+ Add level")
+				.onClick(() => {
+					const maxLevel = this.levels.reduce((m, l) => Math.max(m, l.level ?? 0), 0);
+					this.levels.push({ level: maxLevel + 1, name: "", color: defaultLevelColor(this.levels.length), lineStyle: "solid" });
+					this.renderRows(rows);
+				}));
+
+		new Setting(contentEl)
+			.addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
+			.addButton((b) => b.setButtonText("Save").setCta().onClick(() => this.trySave()));
+	}
+
+	private renderRows(container: HTMLElement): void {
+		container.empty();
+
+		this.levels.forEach((lvl, idx) => {
+			const row = container.createDiv({ cls: "relations-org-level-row" });
+
+			const numInput = row.createEl("input", { type: "number", cls: "relations-org-level-number" });
+			numInput.min = "1";
+			numInput.step = "1";
+			numInput.value = lvl.level != null ? String(lvl.level) : "";
+
+			const nameInput = row.createEl("input", { type: "text", cls: "relations-org-level-name" });
+			nameInput.placeholder = "e.g. Leader";
+			nameInput.value = lvl.name;
+
+			const colorInput = row.createEl("input", { type: "color", cls: "relations-types-color" });
+			colorInput.value = lvl.color || defaultLevelColor(idx);
+			colorInput.title = "Level color — legend swatch, ring color (single member) or hub fill (multiple members)";
+			colorInput.addEventListener("change", () => { lvl.color = colorInput.value; });
+
+			const lineSelect = row.createEl("select", { cls: "relations-types-linestyle" });
+			lineSelect.title = "Line style — connector from this level up to the level above it";
+			for (const opt of ["solid", "dashed", "dotted", "double"] as const) {
+				const o = lineSelect.createEl("option", { text: opt });
+				o.value = opt;
+				if ((lvl.lineStyle || "solid") === opt) o.selected = true;
+			}
+			lineSelect.addEventListener("change", () => { lvl.lineStyle = lineSelect.value as LineStyle; });
+
+			const removeBtn = row.createEl("button", { text: "✕", cls: "relations-types-remove" });
+			removeBtn.title = "Remove level";
+
+			const errorEl = row.createDiv({ cls: "relations-org-level-error" });
+
+			const updateError = (): void => {
+				const dup = lvl.level != null
+					&& this.levels.some((other, j) => j !== idx && other.level === lvl.level);
+				errorEl.setText(dup ? `Level ${lvl.level} already exists` : "");
+				numInput.toggleClass("has-error", dup);
+			};
+
+			numInput.addEventListener("input", () => {
+				const v = parseInt(numInput.value, 10);
+				lvl.level = Number.isFinite(v) ? v : null;
+			});
+			numInput.addEventListener("blur", updateError);
+
+			nameInput.addEventListener("input", () => { lvl.name = nameInput.value; });
+
+			removeBtn.addEventListener("click", () => {
+				this.levels.splice(idx, 1);
+				this.renderRows(container);
+			});
+
+			updateError();
+		});
+	}
+
+	private trySave(): void {
+		const trimmedName = this.name.trim();
+		if (!trimmedName) {
+			new Notice("Enter a name for the hierarchy.");
+			return;
+		}
+		if (this.isNameTaken(trimmedName)) {
+			new Notice(`A hierarchy named "${trimmedName}" already exists.`);
+			return;
+		}
+
+		const { errors, warnings } = validateLevels(this.levels);
+		if (errors.length > 0) {
+			new Notice(errors[0]);
+			return;
+		}
+		if (warnings.length > 0) {
+			new Notice(warnings[0]);
+		}
+
+		// Validated above: every level has a non-null number and non-empty name.
+		const cleanLevels = this.levels
+			.map((l) => ({ level: l.level as number, name: l.name.trim(), color: l.color, lineStyle: l.lineStyle }))
+			.sort((a, b) => a.level - b.level);
+
+		this.close();
+		this.onSave(trimmedName, cleanLevels);
+	}
 }
