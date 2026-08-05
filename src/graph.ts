@@ -17,6 +17,16 @@ import { GraphCache } from "./graph-cache";
  * Pure and side-effect-free — returns a new graph, leaving the input untouched —
  * so it's safe to apply to a cached graph without poisoning the cache. When
  * nothing is disabled it returns the original graph reference unchanged.
+ *
+ * For scope: local / connected / family, callers (buildLocalGraph,
+ * buildConnectedGraph, buildFamilyNeighborhood) apply this filter to the full
+ * graph BEFORE walking the hop-limited neighborhood, so hop distance is
+ * computed over the already-filtered edge set. A note reachable only through
+ * a disabled-type edge is excluded entirely rather than surfacing as a
+ * seemingly-disconnected orphan kept alive by some other edge of its own.
+ * When calling this function directly on an already hop-limited graph, that
+ * guarantee doesn't apply — filtering after the fact can still leave such
+ * orphans.
  */
 export function filterGraphByTypes(
 	graph: RelationsGraph,
@@ -161,6 +171,12 @@ export function buildFullGraph(
  *
  * The full graph is fetched via the same cache as `buildFullGraph` — local-graph
  * calls from multiple embeds on the same page reuse one scan.
+ *
+ * The global disabled-types filter is applied to the full graph BEFORE the
+ * hop-limited neighborhood is walked, so hop distance reflects only edges the
+ * user can actually see. A note reachable solely through a disabled-type edge
+ * is excluded entirely, rather than surfacing as an orphan kept alive by an
+ * unrelated visible edge of its own.
  */
 export function buildLocalGraph(
 	app: App,
@@ -180,7 +196,8 @@ export function buildLocalGraph(
 		return { nodes: [], edges: [] };
 	}
 
-	return localSubgraph(full, centerPath, depth);
+	const filtered = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
+	return localSubgraph(filtered, centerPath, depth);
 }
 
 /**
@@ -294,10 +311,15 @@ export function connectedComponent(
  * the vault including disconnected islands) and from `local` (which bounds
  * by hop count).
  *
- * Edge types are not filtered — any edge counts as a connection. A long
- * chain through friends-of-friends or mentor-of-rival will still be followed.
- * For tightly-bounded vaults this is the right thing; for vaults with lots
- * of weak side-relationships the connected component may grow large.
+ * Edge types that are globally disabled are removed from the full graph
+ * BEFORE the component is walked — a note reachable only through a
+ * disabled-type edge is excluded entirely rather than surfacing as a
+ * disconnected-looking orphan kept alive by some other visible edge of its
+ * own. What remains still follows arbitrarily long chains through
+ * friends-of-friends or mentor-of-rival; only the edge *types* are filtered,
+ * not the walk depth. For tightly-bounded vaults this is the right thing;
+ * for vaults with lots of weak side-relationships the connected component
+ * may grow large.
  */
 export function buildConnectedGraph(
 	app: App,
@@ -316,7 +338,8 @@ export function buildConnectedGraph(
 		}
 		return { nodes: [], edges: [] };
 	}
-	return connectedComponent(full, centerPath);
+	const filtered = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
+	return connectedComponent(filtered, centerPath);
 }
 
 /**
@@ -350,7 +373,11 @@ export function buildFamilyNeighborhood(
 		return { nodes: [], edges: [] };
 	}
 
-	return filterFamilyNeighborhood(full, focusPath, depth);
+	// Disabled types are stripped before the genealogy walk so a disabled
+	// parent/child relationship type can't pull an otherwise-hidden ancestor
+	// or descendant into the neighborhood.
+	const filtered = filterGraphByTypes(full, new Set(settings.disabledTypes), focusPath);
+	return filterFamilyNeighborhood(filtered, focusPath, depth);
 }
 
 export function filterFamilyNeighborhood(
