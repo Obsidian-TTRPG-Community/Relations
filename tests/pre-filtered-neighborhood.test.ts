@@ -221,3 +221,93 @@ describe("buildFamilyNeighborhood — pre-filtered genealogy walk (disabledTypes
 		expect(ids(graph)).toEqual(["Focus.md", "P.md", "Q.md"]);
 	});
 });
+
+/**
+ * Regression tests for the `groups:` counterpart of the same bug — reported
+ * separately (bug_report_graph_filtering.md / github_bug_report_orphaned_nodes.md)
+ * after the disabledTypes fix above shipped, because `groups:` filtering was
+ * built independently and still filtered the hop-limited graph after the walk
+ * instead of before it. Same fix shape: buildLocalGraph / buildConnectedGraph /
+ * buildFamilyNeighborhood now take an optional `groups` set and apply
+ * filterGraphByGroups before the walk, exactly like disabledTypes.
+ *
+ * Reproduces the reported case: Varinka (parent type is in the "Family"
+ * group, enemy/ally are in "Social") rendered with `groups: Social` should
+ * not show her parent Amalayin (reachable only via the now-hidden Family-group
+ * parent edge) even though Amalayin has her own visible Social-group enemy edge.
+ */
+describe("buildLocalGraph — pre-filtered hop distance (groups)", () => {
+	const VAULT: FakeNote[] = [
+		{ path: "Varinka.md", frontmatter: { parent: ["[[Amalayin]]"] } },
+		{ path: "Amalayin.md", frontmatter: { enemy: ["[[Kolimot]]"] } },
+		{ path: "Kolimot.md", frontmatter: {} },
+		{ path: "Twice.md", frontmatter: { parent: ["[[Varinka]]"], ally: ["[[AllyA]]", "[[AllyB]]", "[[AllyC]]", "[[AllyD]]"] } },
+		{ path: "AllyA.md", frontmatter: {} },
+		{ path: "AllyB.md", frontmatter: {} },
+		{ path: "AllyC.md", frontmatter: {} },
+		{ path: "AllyD.md", frontmatter: {} },
+	];
+
+	const TYPES = [
+		familyParentType({ group: "Family" }),
+		socialType("enemy", { group: "Social" }),
+		socialType("ally", { group: "Social" }),
+	];
+
+	it("excludes a node reachable only via a hidden-group edge, not just the edge itself", () => {
+		const app = makeFakeApp(VAULT);
+		const settings = settingsWith(TYPES);
+		const graph = buildLocalGraph(app, settings, "Varinka.md", 2, null, new Set(["Social"])).graph;
+		// Amalayin/Kolimot and Twice/Ally* are only reachable through the
+		// Family-group parent edges, hidden by `groups: Social` — they must not
+		// appear at all, not survive as a disconnected orphan cluster.
+		expect(ids(graph)).toEqual(["Varinka.md"]);
+		expect(graph.edges).toEqual([]);
+	});
+
+	it("still shows the node when its group is included", () => {
+		const app = makeFakeApp(VAULT);
+		const settings = settingsWith(TYPES);
+		const graph = buildLocalGraph(app, settings, "Varinka.md", 2, null, new Set(["Family"])).graph;
+		expect(ids(graph)).toEqual(["Amalayin.md", "Twice.md", "Varinka.md"]);
+	});
+
+	it("composes with the global disabledTypes filter", () => {
+		const app = makeFakeApp(VAULT);
+		const settings = settingsWith(TYPES, { disabledTypes: ["ally"] });
+		const graph = buildLocalGraph(app, settings, "Varinka.md", 2, null, new Set(["Family", "Social"])).graph;
+		// ally is disabled globally, so Twice's Ally* cluster vanishes, but the
+		// Family-group parent edge from Twice to Varinka stays visible — Twice
+		// himself still shows, and Amalayin's still-enabled Social-group enemy
+		// edge to Kolimot puts Kolimot at exactly 2 hops out.
+		expect(ids(graph)).toEqual(["Amalayin.md", "Kolimot.md", "Twice.md", "Varinka.md"]);
+	});
+});
+
+describe("buildConnectedGraph — pre-filtered reachability (groups)", () => {
+	it("excludes a whole cluster reachable only through a hidden-group edge", () => {
+		const app = makeFakeApp([
+			{ path: "Varinka.md", frontmatter: { parent: ["[[Amalayin]]"] } },
+			{ path: "Amalayin.md", frontmatter: { enemy: ["[[Kolimot]]"] } },
+			{ path: "Kolimot.md", frontmatter: {} },
+		]);
+		const settings = settingsWith([familyParentType({ group: "Family" }), socialType("enemy", { group: "Social" })]);
+		const graph = buildConnectedGraph(app, settings, "Varinka.md", null, new Set(["Social"])).graph;
+		expect(ids(graph)).toEqual(["Varinka.md"]);
+		expect(graph.edges).toEqual([]);
+	});
+});
+
+describe("buildFamilyNeighborhood — pre-filtered genealogy walk (groups)", () => {
+	it("excludes an ancestor's partner reachable only through a hidden-group parent edge", () => {
+		const app = makeFakeApp([
+			{ path: "Focus.md", frontmatter: { parent: ["[[P]]"] } },
+			{ path: "P.md", frontmatter: { spouse: ["[[Q]]"] } },
+			{ path: "Q.md", frontmatter: {} },
+		]);
+		const settings = settingsWith([familyParentType({ group: "Family" }), spouseType({ group: "Romance" })]);
+		const graph = buildFamilyNeighborhood(app, settings, "Focus.md", undefined, null, new Set(["Romance"])).graph;
+		expect(ids(graph)).toEqual(["Focus.md"]);
+		expect(graph.edges).toEqual([]);
+	});
+});

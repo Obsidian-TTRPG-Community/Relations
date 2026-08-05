@@ -132,9 +132,6 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | `id`          | none                   | a stable identifier for this block. Required to **lock** the layout — see below |
 | `groups`      | none (no filtering)    | show only edges whose relationship type is in one of these groups (OR logic), e.g. `groups: "Social, Bond"` or `groups: ["Social", "Bond"]`. Strict match — ungrouped types are excluded once this is set. Groups are defined per relationship type in **Settings**. Composes with the global type filter, which is applied first |
 
-> [!WARNING]
-> **Known limitation:** with `scope: local` or `scope: connected`, the note neighborhood is walked using *every* relationship type before `groups:` hides anything. A note reachable only through a hidden type can still appear if it has its own edges of a visible type — it'll look like a disconnected extra cluster with no visible link back to the focus note. `scope: full` isn't affected, since it isn't hop-limited from a center note.
-
 ## Family views
 
 Relations has two layouts built for genealogy. Both are focused on the host note and align generations in horizontal rows — parents above, the focus and any partners on the middle row, children below. They differ only in **how connections are drawn**:

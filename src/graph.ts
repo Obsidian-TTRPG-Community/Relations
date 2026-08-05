@@ -210,16 +210,15 @@ function pushRelationshipEdge(
  * Pure and side-effect-free — returns a new graph, leaving the input untouched.
  * When enabledGroups is empty it returns the original graph reference unchanged.
  *
- * KNOWN LIMITATION: this only strips edges from an already-built graph. For
- * scope: local / connected, the hop-limited neighborhood (buildLocalGraph /
- * buildConnectedGraph) is walked over ALL edge types before this runs, so a
- * note reachable only through a now-hidden type can still surface here if it
- * happens to have its own edges of a visible type (they keep it from being
- * pruned as isolated) — it renders as a seemingly disconnected extra node/
- * cluster. Fixing this needs hop-distance computed over the pre-filtered edge
- * set instead, which touches buildLocalGraph/buildConnectedGraph and would
- * change the pre-existing disabledTypes filter's behavior too — out of scope
- * for this filter alone. See README's "Known limitation" callout.
+ * For scope: local / connected / family, callers (buildLocalGraph,
+ * buildConnectedGraph, buildFamilyNeighborhood) apply this filter — via their
+ * optional `groups` parameter — to the full graph BEFORE walking the
+ * hop-limited neighborhood, the same way the global disabledTypes filter is
+ * applied. This means a note reachable only through a now-hidden-group edge
+ * is excluded entirely rather than surfacing as an orphan kept alive by some
+ * other visible-group edge of its own. Calling this function directly on an
+ * already hop-limited graph doesn't get that guarantee — filtering after the
+ * fact can still leave such orphans.
  *
  * @param graph - The graph to filter
  * @param enabledGroups - Set of group names to include (OR logic)
@@ -438,6 +437,7 @@ export function buildLocalGraph(
 	centerPath: string,
 	depth: number,
 	cache: GraphCache | null = null,
+	groups?: ReadonlySet<string>,
 ): GraphBuildResult {
 	const { graph: full, aliasMap } = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
@@ -449,7 +449,15 @@ export function buildLocalGraph(
 		return { graph: { nodes: [], edges: [] }, aliasMap };
 	}
 
-	const filtered = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
+	let filtered = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
+	// A code-block `groups:` filter must also be applied before the hop-limited
+	// walk, same as disabledTypes above — otherwise a note reachable only
+	// through a now-hidden-group edge can pass the hop check and then surface
+	// as an orphan once its connecting edge is stripped (issues: orphaned
+	// nodes with groups filtering).
+	if (groups && groups.size > 0) {
+		filtered = filterGraphByGroups(filtered, groups, centerPath, settings.relationshipTypes);
+	}
 	return { graph: localSubgraph(filtered, centerPath, depth), aliasMap };
 }
 
@@ -575,6 +583,7 @@ export function buildConnectedGraph(
 	settings: RelationsSettings,
 	centerPath: string,
 	cache: GraphCache | null = null,
+	groups?: ReadonlySet<string>,
 ): GraphBuildResult {
 	const { graph: full, aliasMap } = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
@@ -585,7 +594,13 @@ export function buildConnectedGraph(
 		}
 		return { graph: { nodes: [], edges: [] }, aliasMap };
 	}
-	const typeFiltered = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
+	let typeFiltered = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
+	// See buildLocalGraph — groups must be filtered before the component walk,
+	// not after, or a note reachable only via a hidden-group edge survives as
+	// an orphan kept alive by its own other visible-group edges.
+	if (groups && groups.size > 0) {
+		typeFiltered = filterGraphByGroups(typeFiltered, groups, centerPath, settings.relationshipTypes);
+	}
 	const filtered = connectedComponent(typeFiltered, centerPath);
 	return { graph: filtered, aliasMap };
 }
@@ -599,6 +614,7 @@ export function buildFamilyNeighborhood(
 	focusPath: string,
 	depth?: number,
 	cache: GraphCache | null = null,
+	groups?: ReadonlySet<string>,
 ): GraphBuildResult {
 	const { graph: full, aliasMap } = buildFullGraph(app, settings, cache);
 
@@ -614,7 +630,13 @@ export function buildFamilyNeighborhood(
 	// Disabled types are stripped before the genealogy walk so a disabled
 	// parent/child relationship type can't pull an otherwise-hidden ancestor
 	// or descendant into the neighborhood.
-	const typeFiltered = filterGraphByTypes(full, new Set(settings.disabledTypes), focusPath);
+	let typeFiltered = filterGraphByTypes(full, new Set(settings.disabledTypes), focusPath);
+	// Same reasoning for a code-block `groups:` filter — apply it before the
+	// walk so a note reachable only via a hidden-group edge is excluded
+	// entirely rather than surfacing as an orphan.
+	if (groups && groups.size > 0) {
+		typeFiltered = filterGraphByGroups(typeFiltered, groups, focusPath, settings.relationshipTypes);
+	}
 	const filtered = filterFamilyNeighborhood(typeFiltered, focusPath, depth);
 	return { graph: filtered, aliasMap };
 }

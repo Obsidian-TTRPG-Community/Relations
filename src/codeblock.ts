@@ -212,6 +212,16 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		let aliasMap;
 		let highlightId: string | undefined;
 
+		// Strict match: ungrouped types are excluded once a groups: filter is
+		// active. Passed into the build* functions below so it's applied to the
+		// full graph BEFORE any hop-limited/component walk — same reasoning as
+		// the global disabledTypes filter (see their JSDoc): filtering after the
+		// walk lets a note reachable only through a hidden-group edge survive
+		// as an orphan, kept alive by its own other visible-group edges.
+		const groups = this.options.groups && this.options.groups.length > 0
+			? new Set(this.options.groups)
+			: undefined;
+
 		// Both `full` and `connected` override family-mode's automatic
 		// neighbourhood narrowing — they're explicit user requests for
 		// "give me more than just the bloodline."
@@ -225,27 +235,30 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				return;
 			}
 			const familyDepth = this.options.depthExplicit ? effectiveDepth : undefined;
-			// buildFamilyNeighborhood applies the disabled-types filter internally,
-			// before the genealogy walk, so a hidden type can't pull an
-			// otherwise-invisible ancestor/descendant into the neighborhood.
-			const familyResult = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache);
+			// buildFamilyNeighborhood applies the disabled-types and groups filters
+			// internally, before the genealogy walk, so a hidden type/group can't
+			// pull an otherwise-invisible ancestor/descendant into the neighborhood.
+			const familyResult = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache, groups);
 			graph = familyResult.graph;
 			aliasMap = familyResult.aliasMap;
 			highlightId = hostFile.path;
 		} else if (this.options.scope === "full") {
 			const fullResult = buildFullGraph(this.app, this.settings, this.cache);
 			// `full` has no hop-limiting to worry about, so filtering order
-			// doesn't matter — apply it here same as before.
+			// doesn't matter — apply both filters here same as before.
 			graph = filterGraphByTypes(fullResult.graph, new Set(this.settings.disabledTypes), highlightId);
+			if (groups) {
+				graph = filterGraphByGroups(graph, groups, highlightId, this.settings.relationshipTypes);
+			}
 			aliasMap = fullResult.aliasMap;
 		} else if (this.options.scope === "connected") {
 			if (!hostFile) {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for connected graph." });
 				return;
 			}
-			// buildConnectedGraph applies the disabled-types filter internally,
-			// before the component is walked (see its JSDoc).
-			const connectedResult = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache);
+			// buildConnectedGraph applies the disabled-types and groups filters
+			// internally, before the component is walked (see its JSDoc).
+			const connectedResult = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache, groups);
 			graph = connectedResult.graph;
 			aliasMap = connectedResult.aliasMap;
 			// `connected` normally has no hop limit — it walks the whole
@@ -262,26 +275,13 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for local graph." });
 				return;
 			}
-			// buildLocalGraph applies the disabled-types filter internally, before
-			// the hop-limited neighborhood is walked (see its JSDoc).
-			const localResult = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache);
+			// buildLocalGraph applies the disabled-types and groups filters
+			// internally, before the hop-limited neighborhood is walked (see its
+			// JSDoc).
+			const localResult = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache, groups);
 			graph = localResult.graph;
 			aliasMap = localResult.aliasMap;
 			highlightId = hostFile.path;
-		}
-
-		// Apply group-based filtering if groups are specified in the code block.
-		// Strict match: ungrouped types are excluded once a groups: filter is active.
-		// (Disabled-types filtering is already applied above — either internally
-		// by the build* function for local/connected/family scope, or explicitly
-		// for full scope.)
-		if (this.options.groups && this.options.groups.length > 0) {
-			graph = filterGraphByGroups(
-				graph,
-				new Set(this.options.groups),
-				highlightId,
-				this.settings.relationshipTypes,
-			);
 		}
 
 		if (graph.nodes.length === 0) {
