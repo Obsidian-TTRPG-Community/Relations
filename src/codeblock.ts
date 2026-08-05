@@ -1,7 +1,7 @@
 import { App, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, parseYaml, setIcon, TFile } from "obsidian";
 import { Core } from "cytoscape";
 import { RelationsSettings, PositionStore, EdgeLabelStore, RelationshipType } from "./types";
-import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes, localSubgraph } from "./graph";
+import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes, filterGraphByGroups, localSubgraph } from "./graph";
 import { renderGraph, synthesizeInformalPartnerships, INFORMAL_PARTNERSHIP_LEGEND } from "./render";
 import { renderFilterPanel } from "./filter-panel";
 import type { GraphCache } from "./graph-cache";
@@ -26,6 +26,7 @@ interface CodeBlockOptions {
 	                          // showNodeLabels setting for this block only
 	spacing?: number;
 	id?: string;
+	groups?: string[];  // strict filter by relationship type groups (OR logic); ungrouped types are excluded. e.g., ["Social", "Bonds"]
 }
 
 const DEFAULTS: CodeBlockOptions = {
@@ -192,6 +193,19 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		let graph;
 		let highlightId: string | undefined;
 
+		// Group-based filtering (strict match; ungrouped types are excluded once
+		// active). Passed down into the build* functions below so that, for
+		// scope: local / connected / family, hop-distance/reachability is
+		// computed over the already-group-filtered edge set — otherwise a note
+		// reachable only through a hidden-group edge could survive as a
+		// seemingly-disconnected orphan kept alive by some other edge of its
+		// own. (The equivalent bug for the global type filter, disabledTypes,
+		// is a separate, pre-existing issue tracked as #28/#29 and isn't
+		// addressed here.)
+		const groups = this.options.groups && this.options.groups.length > 0
+			? new Set(this.options.groups)
+			: undefined;
+
 		// Both `full` and `connected` override family-mode's automatic
 		// neighbourhood narrowing — they're explicit user requests for
 		// "give me more than just the bloodline."
@@ -205,20 +219,26 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				return;
 			}
 			const familyDepth = this.options.depthExplicit ? effectiveDepth : undefined;
-			graph = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache);
+			graph = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache, groups);
 			highlightId = hostFile.path;
 		} else if (this.options.scope === "full") {
 			graph = buildFullGraph(this.app, this.settings, this.cache);
+			// `full` has no hop-limiting to worry about, so filtering order
+			// doesn't matter — apply groups here same as the type filter below.
+			if (groups) {
+				graph = filterGraphByGroups(graph, groups, highlightId, this.settings.relationshipTypes);
+			}
 		} else if (this.options.scope === "connected") {
 			if (!hostFile) {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for connected graph." });
 				return;
 			}
-			graph = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache);
+			graph = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache, groups);
 			// `connected` normally has no hop limit — it walks the whole
 			// component. But an explicitly written `depth:` shouldn't be
 			// silently ignored, and mini embeds always force a compact 1-hop
-			// view, so in either case bound the component by depth.
+			// view, so in either case bound the (already-group-filtered) component
+			// by depth.
 			if (this.options.depthExplicit || effectiveSize === "mini") {
 				graph = localSubgraph(graph, hostFile.path, effectiveDepth);
 			}
@@ -228,7 +248,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for local graph." });
 				return;
 			}
-			graph = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache);
+			graph = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache, groups);
 			highlightId = hostFile.path;
 		}
 
@@ -455,7 +475,28 @@ export function resolveFamilyMode(parsed: Record<string, unknown>): "graph" | "t
 	return undefined;
 }
 
-function parseOptions(source: string): ParsedOptions {
+/**
+ * Groups: filter by relationship type groups (OR logic). Accept comma-separated
+ * string or array. Pure (no Obsidian deps) so it can be unit-tested directly.
+ */
+export function resolveGroups(parsed: Record<string, unknown>): string[] | undefined {
+	const rawGroups = parsed["groups"];
+	let groups: string[] | undefined;
+	if (typeof rawGroups === "string") {
+		groups = rawGroups
+			.split(",")
+			.map((g) => g.trim())
+			.filter(Boolean);
+	} else if (Array.isArray(rawGroups)) {
+		groups = rawGroups
+			.map((g) => String(g).trim())
+			.filter(Boolean);
+	}
+	if (groups && groups.length === 0) groups = undefined;
+	return groups;
+}
+
+export function parseOptions(source: string): ParsedOptions {
 	let parsed: Record<string, unknown> = {};
 	try {
 		const raw: unknown = parseYaml(source);
@@ -540,7 +581,9 @@ function parseOptions(source: string): ParsedOptions {
 			? String(rawId)
 			: undefined;
 
-	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, sizeExplicit, depthExplicit };
+	const groups = resolveGroups(parsed);
+
+	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, groups, sizeExplicit, depthExplicit };
 }
 
 function resolveHostFile(app: App, hostPath: string, sourcePath: string): TFile | null {

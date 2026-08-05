@@ -128,6 +128,7 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | `labels`      | (inherits setting)     | `true`/`false` to show or hide note names under nodes for this block, overriding the global **Show node labels** setting |
 | `spacing`     | `1.0` (`0.55` in mini) | family views only: node spacing multiplier. Lower = tighter tree with shorter edges and larger nodes (good for infoboxes); higher = more spread out. Range `0.2`–`3` |
 | `id`          | none                   | a stable identifier for this block. Required to **lock** the layout — see below |
+| `groups`      | none (no filtering)    | show only edges whose relationship type is in one of these groups (OR logic), e.g. `groups: "Social, Bond"` or `groups: ["Social", "Bond"]`. Strict match — ungrouped types are excluded once this is set. Groups are defined per relationship type in **Settings**. Composes with the global type filter, which is applied first |
 
 ## Family views
 
