@@ -197,6 +197,25 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 	phantomPlaceholderImage: "",
 };
 
+/**
+ * Represents a parsed link from frontmatter.
+ * Supports multiple formats: plain text, wikilinks, and aliased links.
+ *
+ * Example:
+ *   - "Alice" → { target: "alice", displayName: "Alice", source: "plain-text" }
+ *   - "[[Alice]]" → { target: "alice", displayName: "Alice", source: "wikilink" }
+ *   - "[[Alice|Bobby]]" → { target: "alice", displayName: "Bobby", source: "wikilink-alias" }
+ *
+ * The target is used to resolve the note in the vault (case-insensitive).
+ * The displayName is shown in the graph (preserves user's capitalization).
+ */
+export interface ParsedLink {
+	target: string;         // Canonical note name (lowercase for comparison)
+	displayName: string;    // Display name for the graph node (preserves user's casing; may be alias)
+	baseName?: string;      // Target name with case preserved (without alias); used by extractLinkTargets
+	source: "plain-text" | "wikilink" | "wikilink-alias";
+}
+
 // Internal model
 export interface GraphNode {
 	id: string;            // file path
@@ -244,6 +263,31 @@ export interface GraphEdge {
 export interface RelationsGraph {
 	nodes: GraphNode[];
 	edges: GraphEdge[];
+}
+
+/**
+ * Per-direction alias map: sourcePath → (targetPath → display alias).
+ * Used to resolve context-aware link display names at render time.
+ * Separate from the cached graph; not part of the cache signature.
+ *
+ * Example:
+ *   Alice → Bob: alias "Bobby"
+ *   Charlie → Bob: alias "Robert"
+ *   Would be represented as:
+ *   {
+ *     "Alice": { "Bob": "Bobby" },
+ *     "Charlie": { "Bob": "Robert" }
+ *   }
+ */
+export type AliasMap = Map<string, Map<string, string>>;
+
+/**
+ * Result of building a full graph, including the graph structure
+ * and a per-direction alias map for context-aware display names.
+ */
+export interface GraphBuildResult {
+	graph: RelationsGraph;
+	aliasMap: AliasMap;
 }
 
 export interface SavedPosition {

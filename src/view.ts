@@ -178,6 +178,7 @@ export class RelationsView extends ItemView {
 		if (!this.canvas) return;
 
 		let graph: RelationsGraph;
+		let aliasMap;
 		let highlightId: string | undefined;
 		let useTree = false;
 
@@ -191,18 +192,21 @@ export class RelationsView extends ItemView {
 			// the hop-limited neighborhood is walked, so a note reachable only via
 			// a disabled-type edge is excluded entirely rather than surfacing as an
 			// orphan kept alive by some other edge of its own.
-			graph = buildLocalGraph(this.app, this.plugin.settings, active.path, this.currentLocalDepth, this.plugin.graphCache);
+			const localResult = buildLocalGraph(this.app, this.plugin.settings, active.path, this.currentLocalDepth, this.plugin.graphCache);
+			graph = localResult.graph;
+			aliasMap = localResult.aliasMap;
 			highlightId = active.path;
 		} else {
 			// `full` has no hop-limiting to worry about, so filtering order doesn't
 			// matter — apply the type filter here before measuring/rendering, so
 			// node counts, layout and the subtitle reflect only what's shown.
-			graph = buildFullGraph(this.app, this.plugin.settings, this.plugin.graphCache);
+			const fullResult = buildFullGraph(this.app, this.plugin.settings, this.plugin.graphCache);
 			graph = filterGraphByTypes(
-				graph,
+				fullResult.graph,
 				new Set(this.plugin.settings.disabledTypes),
 				highlightId,
 			);
+			aliasMap = fullResult.aliasMap;
 		}
 
 		if (this.mode === "local") {
@@ -235,6 +239,8 @@ export class RelationsView extends ItemView {
 			useTreeLayout: useTree,
 			labelStore: this.plugin,
 			editableLabels: true,
+			aliasMap,
+			centerPath: highlightId,
 		});
 
 		this.renderLegend();

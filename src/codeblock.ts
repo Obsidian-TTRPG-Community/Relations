@@ -209,6 +209,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		}
 
 		let graph;
+		let aliasMap;
 		let highlightId: string | undefined;
 
 		// Both `full` and `connected` override family-mode's automatic
@@ -227,13 +228,16 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			// buildFamilyNeighborhood applies the disabled-types filter internally,
 			// before the genealogy walk, so a hidden type can't pull an
 			// otherwise-invisible ancestor/descendant into the neighborhood.
-			graph = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache);
+			const familyResult = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache);
+			graph = familyResult.graph;
+			aliasMap = familyResult.aliasMap;
 			highlightId = hostFile.path;
 		} else if (this.options.scope === "full") {
-			graph = buildFullGraph(this.app, this.settings, this.cache);
+			const fullResult = buildFullGraph(this.app, this.settings, this.cache);
 			// `full` has no hop-limiting to worry about, so filtering order
 			// doesn't matter — apply it here same as before.
-			graph = filterGraphByTypes(graph, new Set(this.settings.disabledTypes), highlightId);
+			graph = filterGraphByTypes(fullResult.graph, new Set(this.settings.disabledTypes), highlightId);
+			aliasMap = fullResult.aliasMap;
 		} else if (this.options.scope === "connected") {
 			if (!hostFile) {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for connected graph." });
@@ -241,7 +245,9 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			}
 			// buildConnectedGraph applies the disabled-types filter internally,
 			// before the component is walked (see its JSDoc).
-			graph = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache);
+			const connectedResult = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache);
+			graph = connectedResult.graph;
+			aliasMap = connectedResult.aliasMap;
 			// `connected` normally has no hop limit — it walks the whole
 			// component. But an explicitly written `depth:` shouldn't be
 			// silently ignored, and mini embeds always force a compact 1-hop
@@ -258,7 +264,9 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			}
 			// buildLocalGraph applies the disabled-types filter internally, before
 			// the hop-limited neighborhood is walked (see its JSDoc).
-			graph = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache);
+			const localResult = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache);
+			graph = localResult.graph;
+			aliasMap = localResult.aliasMap;
 			highlightId = hostFile.path;
 		}
 
@@ -305,6 +313,8 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			// No room for a label editor in mini embeds, and double-click in a
 			// tiny graph is more likely to be an accident than intent.
 			editableLabels: effectiveSize !== "mini",
+			aliasMap,
+			centerPath: highlightId,
 		});
 
 		if (effectiveSize !== "mini") this.addLockControl(el);

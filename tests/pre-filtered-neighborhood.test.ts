@@ -129,7 +129,7 @@ describe("buildLocalGraph — pre-filtered hop distance (disabledTypes)", () => 
 	it("excludes a node reachable only via a disabled-type edge, not just the disabled edge itself", () => {
 		const app = makeFakeApp(VAULT);
 		const settings = settingsWith(TYPES, { disabledTypes: ["parent"] });
-		const graph = buildLocalGraph(app, settings, "Varinka.md", 2, null);
+		const graph = buildLocalGraph(app, settings, "Varinka.md", 2, null).graph;
 		// Amalayin/Kolimot and Twice/Ally* are only reachable through the disabled
 		// parent edges — with the fix they must not appear at all, not survive as
 		// a disconnected orphan cluster.
@@ -152,7 +152,7 @@ describe("buildLocalGraph — pre-filtered hop distance (disabledTypes)", () => 
 			{ path: "B.md", frontmatter: {} },
 		]);
 		const settings = settingsWith([familyParentType(), socialType("social")], { disabledTypes: ["parent"] });
-		const graph = buildLocalGraph(app, settings, "C.md", 2, null);
+		const graph = buildLocalGraph(app, settings, "C.md", 2, null).graph;
 		expect(ids(graph)).toEqual(["A.md", "B.md", "C.md", "E.md"]);
 		const edgePairs = graph.edges.map((e) => `${e.source}->${e.target}`).sort();
 		expect(edgePairs).toEqual(["C.md->A.md", "C.md->E.md", "E.md->B.md"]);
@@ -161,7 +161,7 @@ describe("buildLocalGraph — pre-filtered hop distance (disabledTypes)", () => 
 	it("retains the center note even when every visible edge is filtered away", () => {
 		const app = makeFakeApp(VAULT);
 		const settings = settingsWith(TYPES, { disabledTypes: ["parent", "enemy", "ally"] });
-		const graph = buildLocalGraph(app, settings, "Varinka.md", 2, null);
+		const graph = buildLocalGraph(app, settings, "Varinka.md", 2, null).graph;
 		expect(ids(graph)).toEqual(["Varinka.md"]);
 		expect(graph.edges).toEqual([]);
 	});
@@ -175,7 +175,7 @@ describe("buildConnectedGraph — pre-filtered reachability (disabledTypes)", ()
 			{ path: "Kolimot.md", frontmatter: {} },
 		]);
 		const settings = settingsWith([familyParentType(), socialType("enemy")], { disabledTypes: ["parent"] });
-		const graph = buildConnectedGraph(app, settings, "Varinka.md", null);
+		const graph = buildConnectedGraph(app, settings, "Varinka.md", null).graph;
 		expect(ids(graph)).toEqual(["Varinka.md"]);
 		expect(graph.edges).toEqual([]);
 	});
@@ -188,7 +188,7 @@ describe("buildConnectedGraph — pre-filtered reachability (disabledTypes)", ()
 			{ path: "D.md", frontmatter: {} },
 		]);
 		const settings = settingsWith([socialType("social")]);
-		const graph = buildConnectedGraph(app, settings, "A.md", null);
+		const graph = buildConnectedGraph(app, settings, "A.md", null).graph;
 		expect(ids(graph)).toEqual(["A.md", "B.md", "C.md", "D.md"]);
 	});
 });
@@ -202,7 +202,7 @@ describe("buildFamilyNeighborhood — pre-filtered genealogy walk (disabledTypes
 			{ path: "Q.md", frontmatter: {} },
 		]);
 		const settings = settingsWith([familyParentType(), spouseType()], { disabledTypes: ["parent"] });
-		const graph = buildFamilyNeighborhood(app, settings, "Focus.md", undefined, null);
+		const graph = buildFamilyNeighborhood(app, settings, "Focus.md", undefined, null).graph;
 		// With the old pipeline, P and Q would survive as a disconnected pair
 		// (P-Q is an enabled spouse edge) even though the only path from Focus
 		// to P is the now-disabled parent edge.
@@ -217,7 +217,7 @@ describe("buildFamilyNeighborhood — pre-filtered genealogy walk (disabledTypes
 			{ path: "Q.md", frontmatter: {} },
 		]);
 		const settings = settingsWith([familyParentType(), spouseType()]);
-		const graph = buildFamilyNeighborhood(app, settings, "Focus.md", undefined, null);
+		const graph = buildFamilyNeighborhood(app, settings, "Focus.md", undefined, null).graph;
 		expect(ids(graph)).toEqual(["Focus.md", "P.md", "Q.md"]);
 	});
 });

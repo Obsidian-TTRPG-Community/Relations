@@ -100,7 +100,7 @@ describe('Phantom Nodes', () => {
       // Alice references Bob, who has no matching file
       addNote(app, 'People/Alice.md', 'Alice', { ally: '[[Bob]]' });
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       // Should have 2 nodes: Alice (real) and Bob (phantom)
       expect(graph.nodes).toHaveLength(2);
@@ -116,7 +116,7 @@ describe('Phantom Nodes', () => {
     it('marks real nodes as not phantom', () => {
       addNote(app, 'People/Alice.md', 'Alice', { ally: '[[Bob]]' });
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       const aliceNode = graph.nodes.find((n) => n.id === 'People/Alice.md');
       expect(aliceNode).toBeDefined();
@@ -126,7 +126,7 @@ describe('Phantom Nodes', () => {
     it('assigns placeholder image to phantom nodes', () => {
       addNote(app, 'People/Alice.md', 'Alice', { ally: '[[Bob]]' });
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       const phantomNode = graph.nodes.find((n) => n.isPhantom);
       expect(phantomNode).toBeDefined();
@@ -139,7 +139,7 @@ describe('Phantom Nodes', () => {
         enemy: '[[Charlie]]',
       });
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       // Count phantom nodes
       const phantomNodes = graph.nodes.filter((n) => n.isPhantom);
@@ -154,7 +154,7 @@ describe('Phantom Nodes', () => {
     it('creates edges to phantom nodes', () => {
       addNote(app, 'People/Alice.md', 'Alice', { ally: '[[Bob]]' });
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       // Should have at least one edge
       expect(graph.edges.length).toBeGreaterThan(0);
@@ -174,7 +174,7 @@ describe('Phantom Nodes', () => {
         phantomPlaceholderImage: 'custom/path/fallback.png',
       };
 
-      const graph = buildFullGraph(app as any, customSettings);
+      const graph = buildFullGraph(app as any, customSettings).graph;
       const phantomNode = graph.nodes.find((n) => n.isPhantom);
 
       // Should attempt to resolve the custom path
@@ -189,7 +189,7 @@ describe('Phantom Nodes', () => {
         phantomPlaceholderImage: '', // Empty path
       };
 
-      const graph = buildFullGraph(app as any, customSettings);
+      const graph = buildFullGraph(app as any, customSettings).graph;
       const phantomNode = graph.nodes.find((n) => n.isPhantom);
 
       // Should still create the phantom node, just without an image
@@ -202,7 +202,7 @@ describe('Phantom Nodes', () => {
     it('preserves display name from aliased links', () => {
       addNote(app, 'People/Alice.md', 'Alice', { ally: '[[Bob|Bobby]]' });
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       const phantomNodes = graph.nodes.filter((n) => n.isPhantom);
       expect(phantomNodes.length).toBeGreaterThanOrEqual(1);
@@ -215,7 +215,7 @@ describe('Phantom Nodes', () => {
     it('phantom node id preserves the raw link text (not lowercased)', () => {
       addNote(app, 'People/Alice.md', 'Alice', { ally: '[[BOB the Bold]]' });
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       const phantomNode = graph.nodes.find((n) => n.isPhantom);
       expect(phantomNode?.id).toBe('BOB the Bold');
@@ -238,7 +238,7 @@ describe('Phantom Nodes', () => {
         relationshipTypes: [...settings.relationshipTypes, childrenType],
       };
 
-      const graph = buildFullGraph(app as any, withChildrenType);
+      const graph = buildFullGraph(app as any, withChildrenType).graph;
 
       // Alice (parent, real) declares Bob (child, phantom) via `children:` —
       // the edge should still be swapped to child->parent, same as a real file.
@@ -252,7 +252,7 @@ describe('Phantom Nodes', () => {
     it("phantom nodes don't get filtered out by edge dedup", () => {
       addNote(app, 'People/Alice.md', 'Alice', { ally: '[[Bob]]' });
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       const phantomNodes = graph.nodes.filter((n) => n.isPhantom);
       expect(phantomNodes.length).toBeGreaterThanOrEqual(1);
@@ -264,7 +264,7 @@ describe('Phantom Nodes', () => {
     it('phantom node edges have required properties', () => {
       addNote(app, 'People/Alice.md', 'Alice', { ally: '[[Bob]]' });
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       graph.edges.forEach((edge) => {
         expect(edge.source).toBeDefined();
@@ -277,7 +277,7 @@ describe('Phantom Nodes', () => {
 
   describe('Phantom nodes in different modes', () => {
     it('phantom nodes work with empty vault', () => {
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
       expect(graph.nodes).toEqual([]);
       expect(graph.edges).toEqual([]);
     });
@@ -286,7 +286,7 @@ describe('Phantom Nodes', () => {
       addNote(app, 'People/Alice.md', 'Alice', { ally: '[[Bob]]' });
       addNote(app, 'People/Charlie.md', 'Charlie');
 
-      const graph = buildFullGraph(app as any, settings);
+      const graph = buildFullGraph(app as any, settings).graph;
 
       const realNodes = graph.nodes.filter(
         (n) => !n.isPhantom && n.id.endsWith('.md')
