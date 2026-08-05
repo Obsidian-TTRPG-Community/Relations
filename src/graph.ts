@@ -38,6 +38,67 @@ export function filterGraphByTypes(
 }
 
 /**
+ * Filter a graph to show only edges whose type's group is in the enabled set — a strict
+ * match. Ungrouped types (no `group` set) are excluded, same as any type whose group
+ * isn't in enabledGroups. Drops any node left with no remaining edges (except
+ * keepNodeId, the active/center note).
+ *
+ * Pure and side-effect-free — returns a new graph, leaving the input untouched.
+ * When enabledGroups is empty it returns the original graph reference unchanged.
+ *
+ * For scope: local / connected / family, callers (buildLocalGraph,
+ * buildConnectedGraph, buildFamilyNeighborhood) apply this filter to the full
+ * graph BEFORE walking the hop-limited neighborhood, so hop distance is
+ * computed over the already-group-filtered edge set. A note reachable only
+ * through a hidden-group edge is excluded entirely rather than surfacing as a
+ * seemingly-disconnected orphan kept alive by some other edge of its own.
+ * (The equivalent bug for the global type filter — disabledTypes — is a
+ * separate, pre-existing issue and is intentionally NOT addressed here; see
+ * #28/#29.) When calling this function directly on an already hop-limited
+ * graph, the pre-walk guarantee doesn't apply — filtering after the fact can
+ * still leave such orphans.
+ *
+ * @param graph - The graph to filter
+ * @param enabledGroups - Set of group names to include (OR logic)
+ * @param keepNodeId - Optional node to retain even if isolated (e.g., center note)
+ * @param relationshipTypes - Array of relationship types to look up group membership
+ */
+export function filterGraphByGroups(
+	graph: RelationsGraph,
+	enabledGroups: ReadonlySet<string>,
+	keepNodeId?: string,
+	relationshipTypes: RelationshipType[] = [],
+): RelationsGraph {
+	if (enabledGroups.size === 0) return graph;
+
+	// Build a map of type name → type definition for quick group lookup
+	const typeMap = new Map<string, RelationshipType>();
+	for (const t of relationshipTypes) {
+		typeMap.set(t.name, t);
+	}
+
+	// Keep only edges whose type's group is in the enabled set. Ungrouped types
+	// don't match any requested group, so they're excluded.
+	const edges = graph.edges.filter((e) => {
+		const type = typeMap.get(e.type);
+		if (!type) return true;  // Type not found, include it (defensive)
+		return type.group ? enabledGroups.has(type.group) : false;
+	});
+
+	// Prune nodes left with no remaining edges
+	const connected = new Set<string>();
+	for (const e of edges) {
+		connected.add(e.source);
+		connected.add(e.target);
+	}
+	const nodes = graph.nodes.filter(
+		(n) => connected.has(n.id) || n.id === keepNodeId,
+	);
+
+	return { nodes, edges };
+}
+
+/**
  * Build the full relationship graph by scanning every markdown file in scope.
  *
  * If a `cache` is provided, it's consulted first — a hit returns the previously-
@@ -161,6 +222,13 @@ export function buildFullGraph(
  *
  * The full graph is fetched via the same cache as `buildFullGraph` — local-graph
  * calls from multiple embeds on the same page reuse one scan.
+ *
+ * An optional groups filter is applied to the full graph BEFORE the hop-limited
+ * neighborhood is walked, so hop distance reflects only edges in a visible
+ * group. A note reachable solely through a hidden-group edge is excluded
+ * entirely, rather than surfacing as an orphan kept alive by an unrelated
+ * visible edge of its own. (disabledTypes has no such guarantee yet — see
+ * filterGraphByGroups's doc comment.)
  */
 export function buildLocalGraph(
 	app: App,
@@ -168,6 +236,7 @@ export function buildLocalGraph(
 	centerPath: string,
 	depth: number,
 	cache: GraphCache | null = null,
+	groups?: ReadonlySet<string>,
 ): RelationsGraph {
 	const full = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
@@ -180,7 +249,10 @@ export function buildLocalGraph(
 		return { nodes: [], edges: [] };
 	}
 
-	return localSubgraph(full, centerPath, depth);
+	const filtered = groups && groups.size > 0
+		? filterGraphByGroups(full, groups, centerPath, settings.relationshipTypes)
+		: full;
+	return localSubgraph(filtered, centerPath, depth);
 }
 
 /**
@@ -294,16 +366,23 @@ export function connectedComponent(
  * the vault including disconnected islands) and from `local` (which bounds
  * by hop count).
  *
- * Edge types are not filtered — any edge counts as a connection. A long
- * chain through friends-of-friends or mentor-of-rival will still be followed.
- * For tightly-bounded vaults this is the right thing; for vaults with lots
- * of weak side-relationships the connected component may grow large.
+ * Edge types aren't globally filtered — any edge counts as a connection. A
+ * long chain through friends-of-friends or mentor-of-rival will still be
+ * followed. For tightly-bounded vaults this is the right thing; for vaults
+ * with lots of weak side-relationships the connected component may grow large.
+ *
+ * An optional groups filter IS applied to the full graph before the component
+ * is walked — a note reachable only through a hidden-group edge is excluded
+ * entirely rather than surfacing as a disconnected-looking orphan kept alive
+ * by some other visible-group edge of its own. (disabledTypes has no such
+ * guarantee yet — see filterGraphByGroups's doc comment.)
  */
 export function buildConnectedGraph(
 	app: App,
 	settings: RelationsSettings,
 	centerPath: string,
 	cache: GraphCache | null = null,
+	groups?: ReadonlySet<string>,
 ): RelationsGraph {
 	const full = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
@@ -316,7 +395,10 @@ export function buildConnectedGraph(
 		}
 		return { nodes: [], edges: [] };
 	}
-	return connectedComponent(full, centerPath);
+	const filtered = groups && groups.size > 0
+		? filterGraphByGroups(full, groups, centerPath, settings.relationshipTypes)
+		: full;
+	return connectedComponent(filtered, centerPath);
 }
 
 /**
@@ -331,6 +413,11 @@ export function buildConnectedGraph(
  *
  * Allies, enemies, mentors etc. are dropped — those don't contribute to the
  * who-had-children-with-whom view that family-graph is for.
+ *
+ * An optional groups filter is applied to the full graph before the genealogy
+ * walk, so a hidden-group parent/child relationship type can't pull an
+ * otherwise-hidden ancestor or descendant into the neighborhood. (disabledTypes
+ * has no such guarantee yet — see filterGraphByGroups's doc comment.)
  */
 export function buildFamilyNeighborhood(
 	app: App,
@@ -338,6 +425,7 @@ export function buildFamilyNeighborhood(
 	focusPath: string,
 	depth?: number,
 	cache: GraphCache | null = null,
+	groups?: ReadonlySet<string>,
 ): RelationsGraph {
 	const full = buildFullGraph(app, settings, cache);
 
@@ -350,7 +438,10 @@ export function buildFamilyNeighborhood(
 		return { nodes: [], edges: [] };
 	}
 
-	return filterFamilyNeighborhood(full, focusPath, depth);
+	const filtered = groups && groups.size > 0
+		? filterGraphByGroups(full, groups, focusPath, settings.relationshipTypes)
+		: full;
+	return filterFamilyNeighborhood(filtered, focusPath, depth);
 }
 
 export function filterFamilyNeighborhood(
