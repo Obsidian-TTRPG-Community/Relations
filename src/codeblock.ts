@@ -1,7 +1,7 @@
 import { App, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, parseYaml, setIcon, TFile } from "obsidian";
 import { Core } from "cytoscape";
 import { RelationsSettings, PositionStore, EdgeLabelStore, RelationshipType } from "./types";
-import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes, localSubgraph } from "./graph";
+import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes, filterGraphByGroups, localSubgraph } from "./graph";
 import { renderGraph, synthesizeInformalPartnerships, INFORMAL_PARTNERSHIP_LEGEND } from "./render";
 import { renderFilterPanel } from "./filter-panel";
 import { findHierarchy, buildOrganizationGraph } from "./organization-hierarchies";
@@ -35,6 +35,7 @@ interface CodeBlockOptions {
 	                          // top-down dagre. "graph": force-directed (fcose/
 	                          // cose per the global layout setting). Set via
 	                          // org-tree:/org-graph: — see resolveOrgMode.
+	groups?: string[];  // strict filter by relationship type groups (OR logic); ungrouped types are excluded. e.g., ["Social", "Bonds"]
 }
 
 const DEFAULTS: CodeBlockOptions = {
@@ -259,6 +260,20 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			// the hop-limited neighborhood is walked (see its JSDoc).
 			graph = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache);
 			highlightId = hostFile.path;
+		}
+
+		// Apply group-based filtering if groups are specified in the code block.
+		// Strict match: ungrouped types are excluded once a groups: filter is active.
+		// (Disabled-types filtering is already applied above — either internally
+		// by the build* function for local/connected/family scope, or explicitly
+		// for full scope.)
+		if (this.options.groups && this.options.groups.length > 0) {
+			graph = filterGraphByGroups(
+				graph,
+				new Set(this.options.groups),
+				highlightId,
+				this.settings.relationshipTypes,
+			);
 		}
 
 		if (graph.nodes.length === 0) {
@@ -572,7 +587,28 @@ export function resolveOrgMode(parsed: Record<string, unknown>): OrgModeResult |
 	return undefined;
 }
 
-function parseOptions(source: string): ParsedOptions {
+/**
+ * Groups: filter by relationship type groups (OR logic). Accept comma-separated
+ * string or array. Pure (no Obsidian deps) so it can be unit-tested directly.
+ */
+export function resolveGroups(parsed: Record<string, unknown>): string[] | undefined {
+	const rawGroups = parsed["groups"];
+	let groups: string[] | undefined;
+	if (typeof rawGroups === "string") {
+		groups = rawGroups
+			.split(",")
+			.map((g) => g.trim())
+			.filter(Boolean);
+	} else if (Array.isArray(rawGroups)) {
+		groups = rawGroups
+			.map((g) => String(g).trim())
+			.filter(Boolean);
+	}
+	if (groups && groups.length === 0) groups = undefined;
+	return groups;
+}
+
+export function parseOptions(source: string): ParsedOptions {
 	let parsed: Record<string, unknown> = {};
 	try {
 		const raw: unknown = parseYaml(source);
@@ -660,7 +696,9 @@ function parseOptions(source: string): ParsedOptions {
 			? String(rawId)
 			: undefined;
 
-	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, orgHierarchy, orgMode, sizeExplicit, depthExplicit };
+	const groups = resolveGroups(parsed);
+
+	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, orgHierarchy, orgMode, groups, sizeExplicit, depthExplicit };
 }
 
 function resolveHostFile(app: App, hostPath: string, sourcePath: string): TFile | null {

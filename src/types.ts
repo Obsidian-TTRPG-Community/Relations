@@ -16,10 +16,14 @@ export interface RelationshipType {
 	// (issue #21: without this, children-declared kids vanish from family
 	// views or corrupt the tree). Ignored when genealogy is false.
 	declaresChild?: boolean;
-	// Optional grouping label. Purely cosmetic: types sharing a group are
-	// clustered under a heading in the legend (e.g. put `parent` and `family`
-	// in a "Family" group). Empty/undefined means ungrouped. Does not affect
-	// graph structure, so it's excluded from the cache signature.
+	// Optional grouping label. Types sharing a group are clustered under a
+	// heading in the legend (e.g. put `parent` and `family` in a "Family"
+	// group), and can be targeted by a code block's `groups:` filter option
+	// (see filterGraphByGroups in graph.ts) — matching there is strict, so an
+	// ungrouped type is excluded whenever a groups: filter is active. Empty/
+	// undefined means ungrouped. Doesn't affect which edges exist in the built
+	// graph (filtering happens post-build against live settings), so it's
+	// still excluded from the cache signature.
 	group?: string;
 }
 
