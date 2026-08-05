@@ -8,7 +8,7 @@ Visualise relationships between notes — for **worldbuilding**, **fiction**, **
 
 <img width="709" height="810" alt="image" src="https://github.com/user-attachments/assets/938811de-7ead-4468-a994-87059f815126" />
 
-[Install](#install) · [Quick start](#quick-start) · [Embedding](#embedding-a-graph-in-a-note) · [Family views](#family-views) · [Organization hierarchies](#organization-hierarchies) · [Legend](#the-legend) · [Settings](#relationship-types)
+[Install](#install) · [Quick start](#quick-start) · [Embedding](#embedding-a-graph-in-a-note) · [Family views](#family-views) · [Organization hierarchies](#organization-hierarchies) · [Legend](#the-legend) · [Settings](#relationship-types) · [Phantom nodes](#phantom-nodes)
 
 </div>
 
@@ -117,8 +117,8 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | Option        | Default                | Notes                                                                          |
 |---------------|------------------------|--------------------------------------------------------------------------------|
 | `size`        | `small`                | `mini` (~160px tall, infobox-friendly), `small` (~320px), `large` (~600px)    |
-| `depth`       | size-dependent         | hops from the focus note. `mini` is forced to 1; `small` defaults to 1; `large` defaults to 3. Only relationships reachable within `depth` hops are drawn — `depth: 1` is the focus note's own relationships (hub-and-spoke), cross-links between two outermost nodes wait until the next depth. An explicit `depth` also bounds `scope: connected` |
-| `scope`       | `local`                | `local` (this note + N hops), `connected` (everyone transitively linked to this note; bounded by `depth` if you set one) or `full` (entire vault) |
+| `depth`       | size-dependent         | hops from the focus note. `mini` is forced to 1; `small` defaults to 1; `large` defaults to 3 |
+| `scope`       | `local`                | `local` (this note + N hops) or `full` (entire vault)                          |
 | `tree`        | `false`                | generic top-down dagre layout for any graph — not family-specific              |
 | `family-graph`| `false`                | family view, **graph-style**: generation-aligned, drawn with Cytoscape edges (marriage / informal partnership / parent→child). [See below](#family-views). |
 | `family-tree` | `false`                | family view, **true tree**: generation-aligned, drawn with orthogonal right-angle connectors. [See below](#family-views). |
@@ -315,7 +315,6 @@ Configure types in **Settings → Relations**. Each type has a name (= frontmatt
 | **Pair**     | Pulls paired nodes very close, with a heavy connector. Use for `spouse`, `partner`, `bonded`.                            |
 | **Tree**     | When this type dominates a graph (≥60% of edges), auto-switches to top-down layout.                                       |
 | **Gen**      | Genealogy — counts as a bloodline edge in the family views (`family-tree` / `family-graph`). Typically `parent`. |
-| **Child**    | For Gen types only: this property is written on the **parent's** note and names the child (e.g. a `children:` property). Relations flips the edge internally so it doesn't matter which side of a bond is declared — parent-side, child-side, or both produce the same tree, and a bond declared from both sides draws as a single line. |
 | **Line**     | `solid`, `dashed`, `dotted`, or `double`. Useful for marking "secret", "former", "rumored" relationships.               |
 
 Defaults shipped:
@@ -340,7 +339,7 @@ Rename, recolour, add, or delete freely — they're just defaults.
 
 ## Portraits
 
-The portrait property name is configurable in settings (default: `npcimage`). Accepted forms:
+The frontmatter property name is configurable via **Portrait property** in Settings → Relations (default: `npcimage`). Accepted forms:
 
 ```yaml
 npcimage: "[[merlin.png]]"                     # vault wikilink (recommended)
@@ -378,6 +377,28 @@ For stricter scoping, set **Folder scope** or **Required tags** in settings:
 Useful if your vault has lots of incidental wikilinks you don't want polluting the graph.
 
 </details>
+
+## Phantom nodes
+
+A relationship can point at a note that doesn't exist yet — you wrote `ally: "[[Bob]]"` before creating Bob's note, or he's a background character you never plan to write up. Rather than silently dropping the reference, Relations still draws it, as a **phantom node**: faded (50% opacity) with a dashed border, so it reads as "not a real note yet" at a glance.
+
+The phantom's id and default label are the link text exactly as written — not lowercased or otherwise normalised — so it matches what you'd type to actually create the note. An alias (`[[Bob|Bobby]]`) still labels the node with the alias; the id underneath stays `Bob`. Once you create a note that resolves the link, it stops appearing as a phantom on the next refresh and behaves like any other note.
+
+### Placeholder image
+
+By default a phantom node has no portrait, just its label. To give phantoms a generic placeholder image (a silhouette, a question mark, whatever suits your vault), set **Phantom placeholder image** in Settings → Relations:
+
+```yaml
+z_Assets/Placeholder_Person.png     # vault path
+[[Placeholder_Person.png]]          # wikilink — resolved the same way as the Portrait property
+```
+
+- Leave it blank to render phantom nodes with no image at all.
+- Unlike the **Portrait property** setting (frontmatter key, default `npcimage`), this field does **not** accept an external URL — only a vault path or a wikilink to a file in your vault.
+- It's a single global setting, not per-relationship-type or per-note: every phantom in the graph uses the same placeholder, since a phantom has no frontmatter of its own to read one from.
+- Phantom nodes never pick up a ring color, even if you have ring-color rules configured — those are resolved from frontmatter too, and phantoms have none.
+
+Clicking a phantom node currently does nothing, since it isn't pointed at a file yet.
 
 ## Building from source
 

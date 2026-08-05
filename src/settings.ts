@@ -146,6 +146,32 @@ export class RelationsSettingTab extends PluginSettingTab {
 					this.plugin.refreshGraphView();
 				}));
 
+		// Image shown on phantom nodes — relationship targets that don't resolve
+		// to an actual file. Same resolution rules as Portrait property (vault
+		// path or wikilink), but no external-URL support since it's not read
+		// from any note's frontmatter.
+		new Setting(containerEl)
+			.setName("Phantom placeholder image")
+			.setDesc(
+				"Vault path or wikilink to the image shown on phantom nodes (e.g., 'z_Assets/Placeholder_Person.png'). " +
+				"Leave blank to show no image."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("z_Assets/Placeholder_Person.png")
+					.setValue(this.plugin.settings.phantomPlaceholderImage)
+					.onChange(async (value) => {
+						this.plugin.settings.phantomPlaceholderImage = value.trim();
+						await this.plugin.saveSettings();
+						this.plugin.refreshGraphView();
+					})
+			);
+
+		containerEl.createEl("p", {
+			text: "Phantom nodes are references to notes that don't exist yet. They render faded, with a dashed border, to distinguish them from real notes.",
+			cls: "setting-item-description",
+		});
+
 		new Setting(containerEl).setName("Connection types").setHeading();
 		const help = containerEl.createDiv({ cls: "setting-item-description" });
 		help.createEl("p", { text: "Each row is one relationship type, matched by frontmatter property name." });

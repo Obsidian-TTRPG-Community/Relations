@@ -43,6 +43,7 @@ function makeSettings(
 		bottomRightIconProperty: "",
 		subtextProperty: "",
 		organizationHierarchies: [],
+		phantomPlaceholderImage: "",
 	};
 }
 

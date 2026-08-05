@@ -47,6 +47,37 @@ export function filterGraphByTypes(
 	return { nodes, edges };
 }
 
+// Genealogy edges are stored child→parent throughout the data model
+// (matching a `parent: [[X]]` declaration written on the child's note). A
+// declares-child type — `children: [[Kid]]` written on the PARENT's note —
+// arrives parent→child, so swap it here at scan time. Everything downstream
+// (family layouts, co-parent inference, the render-layer arrow inversion)
+// assumes the child→parent convention. The type's own name is kept:
+// rewriting to a synthetic type would break every by-name lookup (filtering,
+// legend, symmetric handling, edge-label keys).
+function pushRelationshipEdge(
+	rawEdges: GraphEdge[],
+	fromPath: string,
+	toPath: string,
+	type: RelationshipType,
+): void {
+	let source = fromPath;
+	let target = toPath;
+	if (type.genealogy && type.declaresChild) {
+		[source, target] = [target, source];
+	}
+	rawEdges.push({
+		source,
+		target,
+		type: type.name,
+		color: type.color,
+		symmetric: type.symmetric,
+		pair: type.pair,
+		lineStyle: type.lineStyle,
+		genealogy: type.genealogy,
+	});
+}
+
 /**
  * Build the full relationship graph by scanning every markdown file in scope.
  *
@@ -70,6 +101,10 @@ export function buildFullGraph(
 
 	const notePaths = new Set<string>();
 	const rawEdges: GraphEdge[] = [];
+	// Unresolved link targets, keyed by the raw link text (case preserved —
+	// it's what a click on the node should try to open/create). Populated
+	// below whenever a link can't be resolved to an existing file.
+	const phantomNodes = new Map<string, string>();
 
 	for (const file of files) {
 		const cache = app.metadataCache.getFileCache(file);
@@ -88,41 +123,30 @@ export function buildFullGraph(
 			const type = typeMap.get(key.toLowerCase());
 			if (!type) continue;
 
-			const targets = extractLinkTargets(fm[key]);
-			for (const target of targets) {
-				const resolved = app.metadataCache.getFirstLinkpathDest(target, file.path);
-				if (!resolved) continue;
-				if (resolved.path === file.path) continue;
-				if (!inScope(resolved, settings)) continue;
+			const refs = extractLinkRefs(fm[key]);
+			for (const ref of refs) {
+				const resolved = app.metadataCache.getFirstLinkpathDest(ref.target, file.path);
 
-				// Genealogy edges are stored child→parent throughout the data
-				// model (matching a `parent: [[X]]` declaration written on the
-				// child's note). A declares-child type — `children: [[Kid]]`
-				// written on the PARENT's note — arrives parent→child, so swap
-				// it here at scan time. Everything downstream (family layouts,
-				// co-parent inference, the render-layer arrow inversion) assumes
-				// the child→parent convention. The type's own name is kept:
-				// rewriting to a synthetic type would break every by-name lookup
-				// (filtering, legend, symmetric handling, edge-label keys).
-				let edgeSource = file.path;
-				let edgeTarget = resolved.path;
-				if (type.genealogy && type.declaresChild) {
-					[edgeSource, edgeTarget] = [edgeTarget, edgeSource];
+				if (resolved) {
+					if (resolved.path === file.path) continue;
+					if (!inScope(resolved, settings)) continue;
+
+					pushRelationshipEdge(rawEdges, file.path, resolved.path, type);
+					hasAnyRelationship = true;
+					notePaths.add(file.path);
+					notePaths.add(resolved.path);
+					continue;
 				}
 
-				rawEdges.push({
-					source: edgeSource,
-					target: edgeTarget,
-					type: type.name,
-					color: type.color,
-					symmetric: type.symmetric,
-					pair: type.pair,
-					lineStyle: type.lineStyle,
-					genealogy: type.genealogy,
-				});
+				// No file resolves this link — record a phantom node so the
+				// relationship still shows up in the graph.
+				pushRelationshipEdge(rawEdges, file.path, ref.target, type);
 				hasAnyRelationship = true;
 				notePaths.add(file.path);
-				notePaths.add(resolved.path);
+				notePaths.add(ref.target);
+				if (!phantomNodes.has(ref.target)) {
+					phantomNodes.set(ref.target, ref.displayName);
+				}
 			}
 		}
 
@@ -140,8 +164,22 @@ export function buildFullGraph(
 		}
 	}
 
+	const placeholderImage = resolvePlaceholderImage(app, settings);
+
 	const nodes: GraphNode[] = [];
 	for (const path of notePaths) {
+		const displayName = phantomNodes.get(path);
+		if (displayName !== undefined) {
+			nodes.push({
+				id: path,
+				label: displayName,
+				tags: [],
+				image: placeholderImage,
+				isPhantom: true,
+			});
+			continue;
+		}
+
 		const f = app.vault.getAbstractFileByPath(path);
 		if (!(f instanceof TFile)) continue;
 		const node = buildNode(app, f, settings);
@@ -612,6 +650,28 @@ function resolveImage(
 	return null;
 }
 
+// Resolves settings.phantomPlaceholderImage the same way resolveImage resolves
+// a frontmatter image value — link-style first, then as a literal vault path.
+function resolvePlaceholderImage(app: App, settings: RelationsSettings): string | null {
+	const v = settings.phantomPlaceholderImage.trim();
+	if (!v) return null;
+
+	const wikiMatch = v.match(/^\[\[([^\]]+)\]\]$/);
+	const linkPath = wikiMatch ? stripAlias(wikiMatch[1]) : v;
+
+	const resolved = app.metadataCache.getFirstLinkpathDest(linkPath, "");
+	if (resolved instanceof TFile) {
+		return app.vault.getResourcePath(resolved);
+	}
+
+	const direct = app.vault.getAbstractFileByPath(normalizePath(linkPath));
+	if (direct instanceof TFile) {
+		return app.vault.getResourcePath(direct);
+	}
+
+	return null;
+}
+
 function inScope(file: TFile, settings: RelationsSettings): boolean {
 	if (settings.folderScopes.length === 0) return true;
 	return settings.folderScopes.some((folder) => {
@@ -630,9 +690,36 @@ function hasRequiredTag(cache: CachedMetadata, requiredTags: string[]): boolean 
 }
 
 export function extractLinkTargets(value: unknown): string[] {
+	return extractLinkRefs(value).map((ref) => ref.target);
+}
+
+export function stripAlias(link: string): string {
+	const pipeIdx = link.indexOf("|");
+	if (pipeIdx >= 0) link = link.slice(0, pipeIdx);
+	const hashIdx = link.indexOf("#");
+	if (hashIdx >= 0) link = link.slice(0, hashIdx);
+	return link.trim();
+}
+
+// A single frontmatter link, resolved down to the raw target text (what
+// getFirstLinkpathDest is called with, and what a phantom node's id becomes
+// when nothing resolves) plus the text a node should display for it.
+export interface LinkRef {
+	target: string;
+	displayName: string;
+}
+
+/**
+ * Same value shapes as extractLinkTargets (single wikilink, multiple
+ * wikilinks, comma-separated plain text, arrays/nesting of any of those),
+ * but keeps the alias half of `[[Target|Display]]` links alongside the
+ * target instead of discarding it — phantom nodes need something to show
+ * as a label since they have no file basename to fall back on.
+ */
+export function extractLinkRefs(value: unknown): LinkRef[] {
 	if (value == null) return [];
 	if (Array.isArray(value)) {
-		return value.flatMap((v) => extractLinkTargets(v));
+		return value.flatMap((v) => extractLinkRefs(v));
 	}
 	if (typeof value !== "string") return [];
 
@@ -642,22 +729,30 @@ export function extractLinkTargets(value: unknown): string[] {
 	const wikiRegex = /\[\[([^\]]+)\]\]/g;
 	const matches = [...s.matchAll(wikiRegex)];
 	if (matches.length > 0) {
-		return matches.map((m) => stripAlias(m[1]));
+		return matches.map((m) => wikilinkRef(m[1]));
 	}
 
 	if (s.includes(",")) {
-		return s.split(",").map((part) => stripAlias(part.trim())).filter(Boolean);
+		return s
+			.split(",")
+			.map((part) => stripAlias(part.trim()))
+			.filter(Boolean)
+			.map((target) => ({ target, displayName: target }));
 	}
 
-	return [stripAlias(s)];
+	const target = stripAlias(s);
+	return [{ target, displayName: target }];
 }
 
-export function stripAlias(link: string): string {
-	const pipeIdx = link.indexOf("|");
-	if (pipeIdx >= 0) link = link.slice(0, pipeIdx);
-	const hashIdx = link.indexOf("#");
-	if (hashIdx >= 0) link = link.slice(0, hashIdx);
-	return link.trim();
+// content is the text between [[ and ]], e.g. "Arthur", "Arthur#Background",
+// or "Arthur|King Arthur#Background".
+function wikilinkRef(content: string): LinkRef {
+	const target = stripAlias(content);
+	const pipeIdx = content.indexOf("|");
+	if (pipeIdx < 0) return { target, displayName: target };
+
+	const alias = stripAlias(content.slice(pipeIdx + 1));
+	return { target, displayName: alias || target };
 }
 
 export function dedupeEdges(edges: GraphEdge[]): GraphEdge[] {

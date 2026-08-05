@@ -89,5 +89,8 @@ function hashSettings(s: RelationsSettings): string {
 		blIcon: s.bottomLeftIconProperty,
 		brIcon: s.bottomRightIconProperty,
 		subtext: s.subtextProperty,
+		// Baked into every phantom node's image field at build time, same
+		// reasoning as the badge properties above.
+		phantomImage: s.phantomPlaceholderImage,
 	});
 }

@@ -133,6 +133,10 @@ export interface RelationsSettings {
 	// Structure" or "Guild Ranks"). Referenced by Group notes via a `relations`
 	// code block's `org:` parameter — see organization-hierarchies.ts.
 	organizationHierarchies: OrganizationHierarchy[];
+
+	// Vault path to the image shown on phantom nodes (unresolved link targets
+	// with no matching file). Empty = phantom nodes render with no image.
+	phantomPlaceholderImage: string;
 }
 
 export const DEFAULT_SETTINGS: RelationsSettings = {
@@ -186,6 +190,7 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 			],
 		},
 	],
+	phantomPlaceholderImage: "",
 };
 
 // Internal model
@@ -216,6 +221,9 @@ export interface GraphNode {
 	// means "use the theme's default node background" — real person-nodes never
 	// set this, so portraits are unaffected.
 	fillColor?: string;
+	// True when this node stands in for an unresolved link target rather than
+	// an actual file — see buildFullGraph's phantom-node handling in graph.ts.
+	isPhantom?: boolean;
 }
 
 export interface GraphEdge {
