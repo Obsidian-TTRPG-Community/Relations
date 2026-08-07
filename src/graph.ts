@@ -429,7 +429,8 @@ export function buildFullGraph(
  * hop-limited neighborhood is walked, so hop distance reflects only edges the
  * user can actually see. A note reachable solely through a disabled-type edge
  * is excluded entirely, rather than surfacing as an orphan kept alive by an
- * unrelated visible edge of its own.
+ * unrelated visible edge of its own. An optional groups filter gets the same
+ * treatment.
  */
 export function buildLocalGraph(
 	app: App,
@@ -572,11 +573,11 @@ export function connectedComponent(
  * BEFORE the component is walked — a note reachable only through a
  * disabled-type edge is excluded entirely rather than surfacing as a
  * disconnected-looking orphan kept alive by some other visible edge of its
- * own. What remains still follows arbitrarily long chains through
- * friends-of-friends or mentor-of-rival; only the edge *types* are filtered,
- * not the walk depth. For tightly-bounded vaults this is the right thing;
- * for vaults with lots of weak side-relationships the connected component
- * may grow large.
+ * own. An optional groups filter gets the same treatment. What remains still
+ * follows arbitrarily long chains through friends-of-friends or mentor-of-
+ * rival; only edge types/groups are filtered, not the walk depth. For
+ * tightly-bounded vaults this is the right thing; for vaults with lots of
+ * weak side-relationships the connected component may grow large.
  */
 export function buildConnectedGraph(
 	app: App,
@@ -606,7 +607,21 @@ export function buildConnectedGraph(
 }
 
 /**
- * Build a graph containing only the genealogy/partner neighbourhood of a focus note.
+ * Build a graph containing only the genealogy/partner neighbourhood of a focus
+ * note: ancestors (transitively up the parent chain), descendants (transitively
+ * down through children of children), and partners of anyone in that set.
+ *
+ * Used by family-graph mode. Without this, family-graph would show every
+ * connected person in the vault — fine for "show me the whole dynasty" but
+ * overwhelming when the user is looking at one character and just wants to see
+ * who's their parent, who's their kid, and who their partners are.
+ *
+ * Allies, enemies, mentors etc. are dropped — those don't contribute to the
+ * who-had-children-with-whom view that family-graph is for.
+ *
+ * Disabled types and an optional groups filter are both stripped before the
+ * genealogy walk, so a hidden parent/child relationship type or group can't
+ * pull an otherwise-hidden ancestor or descendant into the neighborhood.
  */
 export function buildFamilyNeighborhood(
 	app: App,
