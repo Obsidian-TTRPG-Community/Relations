@@ -8,7 +8,7 @@ Visualise relationships between notes — for **worldbuilding**, **fiction**, **
 
 <img width="709" height="810" alt="image" src="https://github.com/user-attachments/assets/938811de-7ead-4468-a994-87059f815126" />
 
-[Install](#install) · [Quick start](#quick-start) · [Embedding](#embedding-a-graph-in-a-note) · [Family views](#family-views) · [Legend](#the-legend) · [Settings](#relationship-types)
+[Install](#install) · [Quick start](#quick-start) · [Embedding](#embedding-a-graph-in-a-note) · [Family views](#family-views) · [Organization hierarchies](#organization-hierarchies) · [Legend](#the-legend) · [Settings](#relationship-types)
 
 </div>
 
@@ -122,6 +122,8 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | `tree`        | `false`                | generic top-down dagre layout for any graph — not family-specific              |
 | `family-graph`| `false`                | family view, **graph-style**: generation-aligned, drawn with Cytoscape edges (marriage / informal partnership / parent→child). [See below](#family-views). |
 | `family-tree` | `false`                | family view, **true tree**: generation-aligned, drawn with orthogonal right-angle connectors. [See below](#family-views). |
+| `org-graph`   | —                      | render a settings-defined [organization hierarchy](#organization-hierarchies) by name, force-directed layout. Replaces the relationship graph entirely for this block. |
+| `org-tree`    | —                      | same, but top-down dagre layout instead of force-directed. |
 | `zoom`        | `1.0`, `1.4` for mini  | zoom multiplier applied after fit. `1.5` or `"150%"` zooms in 50%             |
 | `height`      | size default           | override the embed's height. Accepts `px`, `em`, `rem`, `vh`, `vw`, or `%`     |
 | `center`      | host note              | wikilink or path of a different note to focus on, e.g. `"[[King Arthur]]"`     |
@@ -205,6 +207,107 @@ spacing: 0.5
 ````
 
 Lower values pull nodes closer together (shorter edges, larger nodes once the view fits); higher values spread them out. The accepted range is `0.2` to `3.0`.
+
+## Organization hierarchies
+
+Beyond typed relationships, Relations can render a **rank structure** for a single note — an adventuring party's chain of command, a guild's ranks, a military hierarchy — using hierarchies you define yourself, instead of one hardcoded shape.
+
+![Organization hierarchy graph, top-down: a Leader node ringed in red, connecting to a blue Officers hub with two officers, a green Members hub with three members, and a yellow Initiates hub with three initiates](docs/organizationhierarchytree.png)
+
+### Define a hierarchy
+
+Configure hierarchies in **Settings → Relations → Organization hierarchies**. Each hierarchy has a name and an ordered list of levels:
+
+- **Level** — position in the hierarchy (1 = top). Gaps (1, 2, 5) are fine; levels always display sorted by number.
+- **Name** — becomes the frontmatter field a Group note lists members under (e.g. "Officers" → `officers`).
+- **Color** — the legend swatch color; also the ring color when a level has one member, or the hub node's fill color when it has several.
+- **Line** — `solid` / `dashed` / `dotted` / `double`, for the connector from this level up to the level above it.
+- **Self** (checkbox) — if this level's field is empty on the note, show the note itself as this level's member instead of skipping the level. Off by default. Useful when the note the code block lives on IS the top of the hierarchy — see [below](#the-note-itself-as-the-top-level).
+
+At least two levels are required, and level numbers and names must be unique.
+
+Default shipped — a hierarchy named "Hierarchy":
+
+| Level | Name       | Colour                | Line  |
+|-------|------------|-------------------------|-------|
+| 1     | Leader     | `#dc2626` red           | solid |
+| 2     | Officers   | `#3b82f6` blue          | solid |
+| 3     | Members    | `#22c55e` green         | solid |
+| 4     | Initiates  | `#eab308` yellow        | solid |
+
+Rename, recolour, add, or delete freely — click **Add hierarchy** to define more (e.g. "Guild Ranks", "Worship Hierarchy") alongside the default, or edit "Hierarchy" itself to fit your vault.
+
+### Use it on a Group note
+
+A level's name converts to a frontmatter field — lowercase, spaces become underscores (`Guild Masters` → `guild_masters`). Using the default hierarchy:
+
+```yaml
+---
+tags: [Category/Group]
+leader: "[[Bob]]"
+officers:
+  - "[[Officer 1]]"
+  - "[[Officer 2]]"
+members:
+  - "[[Member 1]]"
+  - "[[Member 2]]"
+  - "[[Member 3]]"
+initiates:
+  - "[[Initiate 1]]"
+  - "[[Initiate 2]]"
+  - "[[Initiate 3]]"
+---
+```
+
+Then render it, the same way you'd embed any other graph:
+
+````markdown
+```relations
+org-tree: Hierarchy
+```
+````
+
+`org-tree` lays the hierarchy out top-down (dagre); swap it for `org-graph` to lay it out force-directed instead — the same split as `family-tree`/`family-graph`. If both are set, `org-tree` wins.
+
+![Same hierarchy as org-graph: force-directed layout with the same Leader, Officers, Members, and Initiates nodes and hub colors, but without the top-down ranking — nodes settle by their connections instead of by level](docs/organizationhierarchygraph.png)
+
+> [!TIP]
+> Command palette → **Insert organization hierarchy code block** drops in an editable `org-tree: Hierarchy Name` block (with `org-graph` included as a commented alternative) so you don't have to type the fences by hand.
+
+### How it renders
+
+- A level with a **single** member shows that member's own portrait directly, ringed in the level's color — no redundant placeholder node for a party of one.
+- A level with **multiple** members gets a colored hub node labeled with the level's name — always visible regardless of the **Show node labels** setting, since it's structural information rather than decoration — with thin connectors fanning out to each member.
+- Levels chain top-down, one connector per level pair, styled with the lower level's line setting.
+- A level with no data on the note is skipped entirely — no empty box in the graph.
+- An unresolved link (a typo'd wikilink, or a name with no matching note) still renders as a plain node instead of silently disappearing, so the mistake is visible.
+
+Clicking a member node opens that note, same as any other graph; hub nodes aren't real notes, so clicking one does nothing. Layout locking, pan/zoom, and both layout engines all work the same as everywhere else in the plugin.
+
+If the code block names a hierarchy that isn't configured, or the note has no data for any level of the named hierarchy, you'll get an inline error instead of a blank graph.
+
+### The note itself as the top level
+
+Some hierarchies don't have a natural note to name at the top — a worship hierarchy's top level is the deity, and the deity's own page is where you'd embed the graph. There's nothing to link to; the note itself IS that level.
+
+Check **Self** on that level in the settings modal, and when its frontmatter field is empty, the note the code block is embedded on stands in as that level's sole member instead of the level being skipped:
+
+```yaml
+# Solari.md
+worshippers:
+  - "[[Kess]]"
+  - "[[Dorn]]"
+```
+
+````markdown
+```relations
+org-tree: Worship Hierarchy
+```
+````
+
+With **Self** checked on "Deity" and no `deity:` field on the note, Solari's own page appears at the top, ringed in the Deity level's color, chained down to the Worshippers hub — same as if `deity: "[[Solari]]"` had been declared explicitly. If a `deity:` field *is* present, it's used as normal; the note only stands in when the field is empty.
+
+This also means a note using only the top level (nothing else filled in) still renders instead of showing "No members found" — the host note counts as that level's data.
 
 ## The legend
 
