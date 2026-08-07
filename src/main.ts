@@ -69,13 +69,30 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 					"# tree: false         # generic top-down dagre layout\n" +
 					"# family-graph: false # focused family view: parents above, partners level, children below\n" +
 					"# org-graph: Hierarchy # render a settings-defined organization hierarchy, force-directed\n" +
-				"# org-tree: Hierarchy  # same, but top-down layout\n" +
+					"# org-tree: Hierarchy  # same, but top-down layout\n" +
 					"# zoom: 1.0           # zoom multiplier; mini defaults to 1.4\n" +
 					"# height: 400px       # override embed height. px, em, rem, vh, vw, %\n" +
 					"# spacing: 1.0        # family-graph node spacing; <1 tighter, >1 looser\n" +
 					"# labels: true        # show note names under nodes\n" +
 					"# id: my-graph        # stable id; required to lock node positions in place\n" +
 					"# center: \"[[Other Note]]\"  # focus a different note\n" +
+					"```\n";
+				insertCodeBlock(editor, block);
+			},
+		});
+
+		// Insert an organization-hierarchy block. Unlike the plain relations block,
+		// org-tree/org-graph always need a hierarchy name — there's no useful bare
+		// default — so this pre-fills an editable placeholder instead of an empty
+		// body, with org-graph included as a commented alternative.
+		this.addCommand({
+			id: "insert-org-block",
+			name: "Insert organization hierarchy code block",
+			editorCallback: (editor: Editor, _view: MarkdownView) => {
+				const block =
+					"```relations\n" +
+					"org-tree: Hierarchy Name\n" +
+					"# org-graph: Hierarchy Name\n" +
 					"```\n";
 				insertCodeBlock(editor, block);
 			},

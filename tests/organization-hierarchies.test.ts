@@ -11,9 +11,10 @@ import type { LevelDraft } from "../src/organization-hierarchies";
 import type { OrganizationHierarchy, RelationsSettings } from "../src/types";
 import { DEFAULT_SETTINGS } from "../src/types";
 
-// color/lineStyle are irrelevant to validateLevels — this just satisfies LevelDraft's shape.
+// color/lineStyle/useHostNoteIfEmpty are irrelevant to validateLevels — this
+// just satisfies LevelDraft's shape.
 function lvl(level: number | null, name: string): LevelDraft {
-	return { level, name, color: "#000000", lineStyle: "solid" };
+	return { level, name, color: "#000000", lineStyle: "solid", useHostNoteIfEmpty: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +174,84 @@ describe("buildOrganizationGraph", () => {
 		expect("error" in result).toBe(true);
 		if ("error" in result) {
 			expect(result.error).toContain("Party Structure");
+		}
+	});
+
+	it("useHostNoteIfEmpty: shows the host note itself as an empty level's sole member", () => {
+		const worship: OrganizationHierarchy = {
+			name: "Worship Hierarchy",
+			levels: [
+				{ level: 1, name: "Deity", color: "#dc2626", useHostNoteIfEmpty: true },
+				{ level: 2, name: "Worshippers", color: "#22c55e" },
+			],
+		};
+		const app = makeFakeApp([
+			{ path: "Solari.md", frontmatter: { worshippers: ["[[Kess]]", "[[Dorn]]"] } },
+			{ path: "Kess.md", frontmatter: {} },
+			{ path: "Dorn.md", frontmatter: {} },
+		]);
+		const result = buildOrganizationGraph(app, settings(), worship, fileFor(app, "Solari.md"));
+		if ("error" in result) throw new Error("expected a graph");
+
+		expect(result.legend.map((l) => l.name)).toEqual(["Deity", "Worshippers"]);
+		const deityNode = result.graph.nodes.find((n) => n.id === "Solari.md");
+		expect(deityNode).toBeDefined();
+		expect(deityNode?.ringColor).toBe("#dc2626");
+		const chainEdge = result.graph.edges.find(
+			(e) => e.source === "Solari.md" && e.target === "org-hub::worshippers",
+		);
+		expect(chainEdge).toBeDefined();
+	});
+
+	it("useHostNoteIfEmpty: explicit frontmatter data still wins over the host-note fallback", () => {
+		const worship: OrganizationHierarchy = {
+			name: "Worship Hierarchy",
+			levels: [
+				{ level: 1, name: "Deity", useHostNoteIfEmpty: true },
+				{ level: 2, name: "Worshippers" },
+			],
+		};
+		const app = makeFakeApp([
+			{ path: "Temple Record.md", frontmatter: { deity: "[[Solari]]", worshippers: ["[[Kess]]"] } },
+			{ path: "Solari.md", frontmatter: {} },
+			{ path: "Kess.md", frontmatter: {} },
+		]);
+		const result = buildOrganizationGraph(app, settings(), worship, fileFor(app, "Temple Record.md"));
+		if ("error" in result) throw new Error("expected a graph");
+
+		// The host note ("Temple Record.md") should NOT appear — Solari does, from the explicit link.
+		expect(result.graph.nodes.some((n) => n.id === "Temple Record.md")).toBe(false);
+		expect(result.graph.nodes.some((n) => n.id === "Solari.md")).toBe(true);
+	});
+
+	it("levels without useHostNoteIfEmpty still skip when their field is empty (regression)", () => {
+		const app = makeFakeApp([
+			{ path: "Group.md", frontmatter: { officers: ["[[A]]", "[[B]]"] } },
+			{ path: "A.md", frontmatter: {} },
+			{ path: "B.md", frontmatter: {} },
+		]);
+		// PARTY_STRUCTURE's "Leader" level has no useHostNoteIfEmpty set, and this
+		// note declares no `leader:` field — it must still be skipped, not
+		// replaced by the host note.
+		const result = buildOrganizationGraph(app, settings(), PARTY_STRUCTURE, fileFor(app, "Group.md"));
+		if ("error" in result) throw new Error("expected a graph");
+		expect(result.legend.map((l) => l.name)).toEqual(["Officers"]);
+		expect(result.graph.nodes.some((n) => n.id === "Group.md")).toBe(false);
+	});
+
+	it("useHostNoteIfEmpty avoids the false 'no members' error when it's the only level with data", () => {
+		const worship: OrganizationHierarchy = {
+			name: "Worship Hierarchy",
+			levels: [
+				{ level: 1, name: "Deity", useHostNoteIfEmpty: true },
+				{ level: 2, name: "Worshippers" },
+			],
+		};
+		const app = makeFakeApp([{ path: "Solari.md", frontmatter: {} }]);
+		const result = buildOrganizationGraph(app, settings(), worship, fileFor(app, "Solari.md"));
+		expect("error" in result).toBe(false);
+		if (!("error" in result)) {
+			expect(result.graph.nodes.map((n) => n.id)).toEqual(["Solari.md"]);
 		}
 	});
 

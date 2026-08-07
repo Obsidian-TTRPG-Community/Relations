@@ -528,7 +528,7 @@
 
 .relations-org-level-row {
 	display: grid;
-	grid-template-columns: 70px 1fr 40px 90px 32px;
+	grid-template-columns: 70px 1fr 40px 90px 32px 32px;
 	gap: 8px;
 	align-items: center;
 }

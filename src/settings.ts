@@ -389,6 +389,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 		addOrgHelpItem("Name", "becomes the frontmatter field a Group note lists members under (e.g. \"Officers\" → officers).");
 		addOrgHelpItem("Color", "legend swatch color; also the ring color when a level collapses to one member, or the hub node's fill color when it has several.");
 		addOrgHelpItem("Line", "solid / dashed / dotted / double. Styles the connector from this level up to the level above it.");
+		addOrgHelpItem("Self", "if this level has no data on the note, show the note itself as this level's member instead of skipping it — e.g. a Deity's own page as the top of its worship hierarchy.");
 
 		const orgList = containerEl.createDiv();
 		this.renderHierarchyList(orgList);
@@ -407,8 +408,8 @@ export class RelationsSettingTab extends PluginSettingTab {
 							this.app,
 							name,
 							[
-								{ level: 1, name: "", color: defaultLevelColor(0), lineStyle: "solid" },
-								{ level: 2, name: "", color: defaultLevelColor(1), lineStyle: "solid" },
+								{ level: 1, name: "", color: defaultLevelColor(0), lineStyle: "solid", useHostNoteIfEmpty: false },
+								{ level: 2, name: "", color: defaultLevelColor(1), lineStyle: "solid", useHostNoteIfEmpty: false },
 							],
 							false,
 							(candidate) => isHierarchyNameTaken(this.plugin.settings, candidate),
@@ -483,6 +484,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 						name: l.name,
 						color: l.color || defaultLevelColor(i),
 						lineStyle: l.lineStyle || "solid",
+						useHostNoteIfEmpty: l.useHostNoteIfEmpty ?? false,
 					})),
 					true,
 					(candidate) => isHierarchyNameTaken(this.plugin.settings, candidate, idx),
@@ -777,15 +779,15 @@ export class HierarchyLevelsModal extends Modal {
 		initialLevels: LevelDraft[],
 		private editableName: boolean,
 		private isNameTaken: (name: string) => boolean,
-		private onSave: (name: string, levels: { level: number; name: string; color: string; lineStyle: LineStyle }[]) => void,
+		private onSave: (name: string, levels: { level: number; name: string; color: string; lineStyle: LineStyle; useHostNoteIfEmpty: boolean }[]) => void,
 	) {
 		super(app);
 		this.name = initialName;
 		this.levels = initialLevels.length > 0
 			? initialLevels.map((l) => ({ ...l }))
 			: [
-				{ level: 1, name: "", color: defaultLevelColor(0), lineStyle: "solid" },
-				{ level: 2, name: "", color: defaultLevelColor(1), lineStyle: "solid" },
+				{ level: 1, name: "", color: defaultLevelColor(0), lineStyle: "solid", useHostNoteIfEmpty: false },
+				{ level: 2, name: "", color: defaultLevelColor(1), lineStyle: "solid", useHostNoteIfEmpty: false },
 			];
 	}
 
@@ -821,7 +823,7 @@ export class HierarchyLevelsModal extends Modal {
 				.setButtonText("+ Add level")
 				.onClick(() => {
 					const maxLevel = this.levels.reduce((m, l) => Math.max(m, l.level ?? 0), 0);
-					this.levels.push({ level: maxLevel + 1, name: "", color: defaultLevelColor(this.levels.length), lineStyle: "solid" });
+					this.levels.push({ level: maxLevel + 1, name: "", color: defaultLevelColor(this.levels.length), lineStyle: "solid", useHostNoteIfEmpty: false });
 					this.renderRows(rows);
 				}));
 
@@ -858,6 +860,11 @@ export class HierarchyLevelsModal extends Modal {
 				if ((lvl.lineStyle || "solid") === opt) o.selected = true;
 			}
 			lineSelect.addEventListener("change", () => { lvl.lineStyle = lineSelect.value as LineStyle; });
+
+			const hostNoteCheckbox = row.createEl("input", { type: "checkbox", cls: "relations-types-cb" });
+			hostNoteCheckbox.checked = lvl.useHostNoteIfEmpty;
+			hostNoteCheckbox.title = "If this level has no data on the note, show the note itself as this level's member instead of skipping it (e.g. a Deity's own page as the top of its worship hierarchy)";
+			hostNoteCheckbox.addEventListener("change", () => { lvl.useHostNoteIfEmpty = hostNoteCheckbox.checked; });
 
 			const removeBtn = row.createEl("button", { text: "✕", cls: "relations-types-remove" });
 			removeBtn.title = "Remove level";
@@ -910,7 +917,13 @@ export class HierarchyLevelsModal extends Modal {
 
 		// Validated above: every level has a non-null number and non-empty name.
 		const cleanLevels = this.levels
-			.map((l) => ({ level: l.level as number, name: l.name.trim(), color: l.color, lineStyle: l.lineStyle }))
+			.map((l) => ({
+				level: l.level as number,
+				name: l.name.trim(),
+				color: l.color,
+				lineStyle: l.lineStyle,
+				useHostNoteIfEmpty: l.useHostNoteIfEmpty,
+			}))
 			.sort((a, b) => a.level - b.level);
 
 		this.close();

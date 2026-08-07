@@ -226,6 +226,7 @@ In **Settings → Relations → Organization hierarchies**, click **Add hierarch
 - **Level** — position in the hierarchy (1 = top). Gaps (1, 2, 5) are fine; levels always display sorted by number.
 - **Color** — the legend swatch color; also the ring color when a level has one member, or the hub node's fill color when it has several.
 - **Line** — `solid` / `dashed` / `dotted` / `double`, for the connector from this level up to the level above it.
+- **Self** (checkbox) — if this level's field is empty on the note, show the note itself as this level's member instead of skipping the level. Off by default. Useful when the note the code block lives on IS the top of the hierarchy — see [below](#the-note-itself-as-the-top-level).
 
 At least two levels are required, and level numbers and names must be unique.
 
@@ -257,6 +258,9 @@ org-tree: Guild Ranks
 
 `org-tree` lays the hierarchy out top-down (dagre); swap it for `org-graph` to lay it out force-directed instead — the same split as `family-tree`/`family-graph`. If both are set, `org-tree` wins.
 
+> [!TIP]
+> Command palette → **Insert organization hierarchy code block** drops in an editable `org-tree: Hierarchy Name` block (with `org-graph` included as a commented alternative) so you don't have to type the fences by hand.
+
 ### How it renders
 
 - A level with a **single** member shows that member's own portrait directly, ringed in the level's color — no redundant placeholder node for a party of one.
@@ -268,6 +272,29 @@ org-tree: Guild Ranks
 Clicking a member node opens that note, same as any other graph; hub nodes aren't real notes, so clicking one does nothing. Layout locking, pan/zoom, and both layout engines all work the same as everywhere else in the plugin.
 
 If the code block names a hierarchy that isn't configured, or the note has no data for any level of the named hierarchy, you'll get an inline error instead of a blank graph.
+
+### The note itself as the top level
+
+Some hierarchies don't have a natural note to name at the top — a worship hierarchy's top level is the deity, and the deity's own page is where you'd embed the graph. There's nothing to link to; the note itself IS that level.
+
+Check **Self** on that level in the settings modal, and when its frontmatter field is empty, the note the code block is embedded on stands in as that level's sole member instead of the level being skipped:
+
+```yaml
+# Solari.md
+worshippers:
+  - "[[Kess]]"
+  - "[[Dorn]]"
+```
+
+````markdown
+```relations
+org-tree: Worship Hierarchy
+```
+````
+
+With **Self** checked on "Deity" and no `deity:` field on the note, Solari's own page appears at the top, ringed in the Deity level's color, chained down to the Worshippers hub — same as if `deity: "[[Solari]]"` had been declared explicitly. If a `deity:` field *is* present, it's used as normal; the note only stands in when the field is empty.
+
+This also means a note using only the top level (nothing else filled in) still renders instead of showing "No members found" — the host note counts as that level's data.
 
 ## The legend
 

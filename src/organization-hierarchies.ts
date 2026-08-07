@@ -93,6 +93,7 @@ export interface LevelDraft {
 	name: string;
 	color: string;
 	lineStyle: LineStyle;
+	useHostNoteIfEmpty: boolean;
 }
 
 export interface LevelValidation {
@@ -157,7 +158,10 @@ export type OrgGraphResult =
  * For each level (sorted, top to bottom):
  *  - Read the frontmatter field named after the level (see toFieldName) and
  *    resolve its wikilinks/plain names to member nodes.
- *  - Empty levels are skipped entirely (no node, no gap in the legend).
+ *  - Empty levels are skipped entirely (no node, no gap in the legend) —
+ *    unless the level has useHostNoteIfEmpty set, in which case the host note
+ *    itself stands in as that level's sole member (e.g. a Deity's own page as
+ *    the top of its worship hierarchy).
  *  - A level with exactly one member is represented by that member's own node
  *    directly — no redundant "level" node when there's nothing to group.
  *  - A level with multiple members gets a synthetic colored "hub" node labeled
@@ -194,12 +198,22 @@ export function buildOrganizationGraph(
 
 		const raw: unknown = frontmatter ? frontmatter[fieldName] : undefined;
 		const targets = extractLinkTargets(raw);
-		if (targets.length === 0) return;
+
+		let members: GraphNode[];
+		if (targets.length > 0) {
+			members = targets.map((t) => resolveMemberNode(app, settings, groupNote, fieldName, t));
+		} else if (level.useHostNoteIfEmpty) {
+			members = [
+				buildNode(app, groupNote, settings)
+					?? { id: groupNote.path, label: groupNote.basename, tags: [], image: null },
+			];
+		} else {
+			return;
+		}
 
 		anyMembers = true;
 		legend.push({ name: level.name, color });
 
-		const members = targets.map((t) => resolveMemberNode(app, settings, groupNote, fieldName, t));
 		for (const m of members) {
 			if (!nodesById.has(m.id)) nodesById.set(m.id, m);
 		}

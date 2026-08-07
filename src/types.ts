@@ -51,6 +51,13 @@ export interface OrganizationLevel {
 	// it (e.g. dashed to mark an "acting"/provisional rank). Mirrors
 	// RelationshipType.lineStyle. Optional; missing values render solid.
 	lineStyle?: LineStyle;
+	// When this level's frontmatter field is empty/absent, show the host note
+	// itself as this level's sole member instead of skipping the level. Useful
+	// when the note the code block lives on IS the top of the hierarchy (e.g. a
+	// Deity's own page as the top of its worship hierarchy) rather than
+	// something that would name itself in its own frontmatter. Off by default —
+	// most levels (e.g. a group's "Leader") should still just skip when empty.
+	useHostNoteIfEmpty?: boolean;
 }
 
 /**
