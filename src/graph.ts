@@ -5,8 +5,131 @@ import {
 	GraphEdge,
 	RelationsSettings,
 	RelationshipType,
+	ParsedLink,
+	AliasMap,
+	GraphBuildResult,
 } from "./types";
 import { GraphCache } from "./graph-cache";
+
+/**
+ * Parse a single link value from frontmatter into a ParsedLink.
+ * Handles three formats:
+ *   1. Plain text: "Alice" → target: "alice", displayName: "Alice"
+ *   2. Wikilink: "[[Alice]]" → target: "alice", displayName: "Alice"
+ *   3. Aliased: "[[Alice|Bobby]]" → target: "alice", displayName: "Bobby"
+ *
+ * Plain text is case-insensitive for vault lookup (target is lowercased),
+ * but preserves user's casing in displayName.
+ */
+export function parseLink(value: unknown): ParsedLink | null {
+	if (value == null) return null;
+	if (typeof value !== "string") return null;
+
+	const s = value.trim();
+	if (!s) return null;
+
+	// Try wikilink format: [[...]] (including empty [[]])
+	const wikiMatch = s.match(/^\[\[(.*?)\]\]$/);
+	if (wikiMatch) {
+		const content = wikiMatch[1].trim();
+		if (!content) return null;
+
+		// Check for pipe alias: "target|display"
+		const pipeIdx = content.indexOf("|");
+		if (pipeIdx >= 0) {
+			const target = content.slice(0, pipeIdx).trim();
+			let displayName = content.slice(pipeIdx + 1).trim();
+
+			// Validate both parts are non-empty
+			if (!target || !displayName) return null;
+
+			// Strip heading anchor from alias if present
+			const hashIdx = displayName.indexOf("#");
+			if (hashIdx >= 0) {
+				displayName = displayName.slice(0, hashIdx).trim();
+			}
+			if (!displayName) return null;
+
+			return {
+				target: normalizeNoteName(target),
+				displayName,
+				baseName: target,  // Preserve target name with case for extractLinkTargets
+				source: "wikilink-alias",
+			};
+		}
+
+		// No pipe: "[[Alice]]" or "[[Alice#section]]"
+		const hashIdx = content.indexOf("#");
+		const baseName = (hashIdx >= 0 ? content.slice(0, hashIdx) : content).trim();
+		if (baseName) {
+			return {
+				target: normalizeNoteName(baseName),
+				displayName: baseName,
+				baseName,  // For consistency with aliased links
+				source: "wikilink",
+			};
+		}
+	}
+
+	// Plain text: "Alice" or "alice"
+	const normalized = normalizeNoteName(s);
+	if (normalized) {
+		return {
+			target: normalized,
+			displayName: s,
+			baseName: s,
+			source: "plain-text",
+		};
+	}
+
+	return null;
+}
+
+/**
+ * Normalize a note name for case-insensitive comparison.
+ * Lowercases the input. Returns empty string if input is blank.
+ */
+export function normalizeNoteName(name: string): string {
+	return name.trim().toLowerCase();
+}
+
+/**
+ * Extract ParsedLink objects from a frontmatter value.
+ * Handles: single values, arrays, comma-separated strings, and nested arrays.
+ *
+ * Returns array of ParsedLink objects. Invalid entries are skipped.
+ */
+export function extractParsedLinks(value: unknown): ParsedLink[] {
+	if (value == null) return [];
+	if (Array.isArray(value)) {
+		return value.flatMap((v) => extractParsedLinks(v));
+	}
+	if (typeof value !== "string") return [];
+
+	const s = value.trim();
+	if (!s) return [];
+
+	// Check for wikilinks first
+	const wikiRegex = /\[\[([^\]]+)\]\]/g;
+	const wikiMatches = [...s.matchAll(wikiRegex)];
+	if (wikiMatches.length > 0) {
+		return wikiMatches
+			.map((m) => parseLink(`[[${m[1]}]]`))
+			.filter((p): p is ParsedLink => p !== null);
+	}
+
+	// No wikilinks: check for comma-separated plain text
+	if (s.includes(",")) {
+		return s
+			.split(",")
+			.map((part) => parseLink(part.trim()))
+			.filter((p): p is ParsedLink => p !== null);
+	}
+
+	// Single plain text value
+	const parsed = parseLink(s);
+	return parsed ? [parsed] : [];
+}
 
 /**
  * Remove edges whose relationship type is in `disabled`, then drop any node left
@@ -17,6 +140,16 @@ import { GraphCache } from "./graph-cache";
  * Pure and side-effect-free — returns a new graph, leaving the input untouched —
  * so it's safe to apply to a cached graph without poisoning the cache. When
  * nothing is disabled it returns the original graph reference unchanged.
+ *
+ * For scope: local / connected / family, callers (buildLocalGraph,
+ * buildConnectedGraph, buildFamilyNeighborhood) apply this filter to the full
+ * graph BEFORE walking the hop-limited neighborhood, so hop distance is
+ * computed over the already-filtered edge set. A note reachable only through
+ * a disabled-type edge is excluded entirely rather than surfacing as a
+ * seemingly-disconnected orphan kept alive by some other edge of its own.
+ * When calling this function directly on an already hop-limited graph, that
+ * guarantee doesn't apply — filtering after the fact can still leave such
+ * orphans.
  */
 export function filterGraphByTypes(
 	graph: RelationsGraph,
@@ -37,8 +170,101 @@ export function filterGraphByTypes(
 	return { nodes, edges };
 }
 
+// Genealogy edges are stored child→parent throughout the data model
+// (matching a `parent: [[X]]` declaration written on the child's note). A
+// declares-child type — `children: [[Kid]]` written on the PARENT's note —
+// arrives parent→child, so swap it here at scan time. Everything downstream
+// (family layouts, co-parent inference, the render-layer arrow inversion)
+// assumes the child→parent convention. The type's own name is kept:
+// rewriting to a synthetic type would break every by-name lookup (filtering,
+// legend, symmetric handling, edge-label keys).
+function pushRelationshipEdge(
+	rawEdges: GraphEdge[],
+	fromPath: string,
+	toPath: string,
+	type: RelationshipType,
+): void {
+	let source = fromPath;
+	let target = toPath;
+	if (type.genealogy && type.declaresChild) {
+		[source, target] = [target, source];
+	}
+	rawEdges.push({
+		source,
+		target,
+		type: type.name,
+		color: type.color,
+		symmetric: type.symmetric,
+		pair: type.pair,
+		lineStyle: type.lineStyle,
+		genealogy: type.genealogy,
+	});
+}
+
+/**
+ * Filter a graph to show only edges whose type's group is in the enabled set — a strict
+ * match. Ungrouped types (no `group` set) are excluded, same as any type whose group
+ * isn't in enabledGroups. Drops any node left with no remaining edges (except
+ * keepNodeId, the active/center note).
+ *
+ * Pure and side-effect-free — returns a new graph, leaving the input untouched.
+ * When enabledGroups is empty it returns the original graph reference unchanged.
+ *
+ * For scope: local / connected / family, callers (buildLocalGraph,
+ * buildConnectedGraph, buildFamilyNeighborhood) apply this filter — via their
+ * optional `groups` parameter — to the full graph BEFORE walking the
+ * hop-limited neighborhood, the same way the global disabledTypes filter is
+ * applied. This means a note reachable only through a now-hidden-group edge
+ * is excluded entirely rather than surfacing as an orphan kept alive by some
+ * other visible-group edge of its own. Calling this function directly on an
+ * already hop-limited graph doesn't get that guarantee — filtering after the
+ * fact can still leave such orphans.
+ *
+ * @param graph - The graph to filter
+ * @param enabledGroups - Set of group names to include (OR logic)
+ * @param keepNodeId - Optional node to retain even if isolated (e.g., center note)
+ * @param relationshipTypes - Array of relationship types to look up group membership
+ */
+export function filterGraphByGroups(
+	graph: RelationsGraph,
+	enabledGroups: ReadonlySet<string>,
+	keepNodeId?: string,
+	relationshipTypes: RelationshipType[] = [],
+): RelationsGraph {
+	if (enabledGroups.size === 0) return graph;
+
+	// Build a map of type name → type definition for quick group lookup
+	const typeMap = new Map<string, RelationshipType>();
+	for (const t of relationshipTypes) {
+		typeMap.set(t.name, t);
+	}
+
+	// Keep only edges whose type's group is in the enabled set. Ungrouped types
+	// don't match any requested group, so they're excluded.
+	const edges = graph.edges.filter((e) => {
+		const type = typeMap.get(e.type);
+		if (!type) return true;  // Type not found, include it (defensive)
+		return type.group ? enabledGroups.has(type.group) : false;
+	});
+
+	// Prune nodes left with no remaining edges
+	const connected = new Set<string>();
+	for (const e of edges) {
+		connected.add(e.source);
+		connected.add(e.target);
+	}
+	const nodes = graph.nodes.filter(
+		(n) => connected.has(n.id) || n.id === keepNodeId,
+	);
+
+	return { nodes, edges };
+}
+
 /**
  * Build the full relationship graph by scanning every markdown file in scope.
+ *
+ * Returns both the graph structure and a per-direction alias map for
+ * context-aware display names. The graph is cached for performance.
  *
  * If a `cache` is provided, it's consulted first — a hit returns the previously-
  * built graph immediately without rescanning the vault. On miss, the freshly-built
@@ -49,10 +275,12 @@ export function buildFullGraph(
 	app: App,
 	settings: RelationsSettings,
 	cache: GraphCache | null = null,
-): RelationsGraph {
+): GraphBuildResult {
+	const aliasMap: AliasMap = new Map();
+
 	if (cache) {
 		const hit = cache.get(settings);
-		if (hit) return hit;
+		if (hit) return { graph: hit, aliasMap };
 	}
 
 	const typeMap = buildTypeMap(settings);
@@ -60,6 +288,10 @@ export function buildFullGraph(
 
 	const notePaths = new Set<string>();
 	const rawEdges: GraphEdge[] = [];
+	// Unresolved link targets, keyed by the raw link text (case preserved —
+	// it's what a click on the node should try to open/create). Populated
+	// below whenever a link can't be resolved to an existing file.
+	const phantomNodes = new Map<string, string>();
 
 	for (const file of files) {
 		const cache = app.metadataCache.getFileCache(file);
@@ -74,45 +306,61 @@ export function buildFullGraph(
 
 		let hasAnyRelationship = false;
 
-		for (const key of Object.keys(fm)) {
-			const type = typeMap.get(key.toLowerCase());
-			if (!type) continue;
+		// Process relationship properties in alphabetical order so that when two
+		// properties alias the same target differently, precedence is deterministic
+		// (independent of the frontmatter's own YAML key order).
+		const relevantKeys = Object.keys(fm)
+			.filter((key) => typeMap.has(key.toLowerCase()))
+			.sort((a, b) => a.localeCompare(b));
 
-			const targets = extractLinkTargets(fm[key]);
-			for (const target of targets) {
-				const resolved = app.metadataCache.getFirstLinkpathDest(target, file.path);
-				if (!resolved) continue;
-				if (resolved.path === file.path) continue;
-				if (!inScope(resolved, settings)) continue;
+		for (const key of relevantKeys) {
+			const type = typeMap.get(key.toLowerCase())!;
 
-				// Genealogy edges are stored child→parent throughout the data
-				// model (matching a `parent: [[X]]` declaration written on the
-				// child's note). A declares-child type — `children: [[Kid]]`
-				// written on the PARENT's note — arrives parent→child, so swap
-				// it here at scan time. Everything downstream (family layouts,
-				// co-parent inference, the render-layer arrow inversion) assumes
-				// the child→parent convention. The type's own name is kept:
-				// rewriting to a synthetic type would break every by-name lookup
-				// (filtering, legend, symmetric handling, edge-label keys).
-				let edgeSource = file.path;
-				let edgeTarget = resolved.path;
-				if (type.genealogy && type.declaresChild) {
-					[edgeSource, edgeTarget] = [edgeTarget, edgeSource];
+			// Resolve via Obsidian's own resolver using the case-preserved link path.
+			// getFirstLinkpathDest already handles case, duplicate basenames, and
+			// relative paths itself — feeding it a lowercased target would only
+			// fight that resolution.
+			const parsedLinks = extractParsedLinks(fm[key]);
+			for (const link of parsedLinks) {
+				const resolved = app.metadataCache.getFirstLinkpathDest(link.baseName ?? link.displayName, file.path);
+
+				if (resolved) {
+					if (resolved.path === file.path) continue;
+					if (!inScope(resolved, settings)) continue;
+
+					pushRelationshipEdge(rawEdges, file.path, resolved.path, type);
+					hasAnyRelationship = true;
+					notePaths.add(file.path);
+					notePaths.add(resolved.path);
+
+					if (link.source === "wikilink-alias") {
+						// Keyed from file.path (not the potentially-swapped source) — the
+						// alias always describes how file.path refers to the target,
+						// regardless of which direction the edge itself is stored.
+						if (!aliasMap.has(file.path)) {
+							aliasMap.set(file.path, new Map());
+						}
+						const targetAliases = aliasMap.get(file.path)!;
+						// First property wins (relevantKeys is alphabetical, and links
+						// within one property are processed in declaration order) when
+						// two properties alias the same target differently.
+						if (!targetAliases.has(resolved.path)) {
+							targetAliases.set(resolved.path, link.displayName);
+						}
+					}
+					continue;
 				}
 
-				rawEdges.push({
-					source: edgeSource,
-					target: edgeTarget,
-					type: type.name,
-					color: type.color,
-					symmetric: type.symmetric,
-					pair: type.pair,
-					lineStyle: type.lineStyle,
-					genealogy: type.genealogy,
-				});
+				// No file resolves this link — record a phantom node so the
+				// relationship still shows up in the graph.
+				const phantomTarget = link.baseName ?? link.displayName;
+				pushRelationshipEdge(rawEdges, file.path, phantomTarget, type);
 				hasAnyRelationship = true;
 				notePaths.add(file.path);
-				notePaths.add(resolved.path);
+				notePaths.add(phantomTarget);
+				if (!phantomNodes.has(phantomTarget)) {
+					phantomNodes.set(phantomTarget, link.displayName);
+				}
 			}
 		}
 
@@ -130,21 +378,75 @@ export function buildFullGraph(
 		}
 	}
 
+	const placeholderImage = resolvePlaceholderImage(app, settings);
+
+	// Deduplicate edges first, filtering to valid path combinations. For a
+	// mutually-declared genealogy bond (e.g. Amalayin's `children:` AND
+	// Varinka's `parents:` both naming the same pair), dedupeEdges keeps
+	// whichever raw edge appears first — which depended on vault scan order
+	// and could flip the displayed type/color across reloads. A stable sort
+	// moves declaresChild-sourced edges (the parent's own claim) after
+	// plain child-declared ones beforehand, so the child's own declaration
+	// deterministically wins the tie regardless of scan order. Edges for
+	// different pairs are never affected by dedup either way, but this also
+	// makes family-connectors.ts's single shared tree-color pick (which
+	// reads the first genealogy edge in this array) consistently prefer the
+	// child-declared type, matching what a plain single-genealogy-type
+	// vault has always shown.
+	const dedupeOrdered = [...rawEdges.filter(
+		(e) => notePaths.has(e.source) && notePaths.has(e.target),
+	)].sort((a, b) => {
+		if (!a.genealogy || !b.genealogy) return 0;
+		const aDeclaresChild = typeMap.get(a.type.toLowerCase())?.declaresChild ?? false;
+		const bDeclaresChild = typeMap.get(b.type.toLowerCase())?.declaresChild ?? false;
+		return Number(aDeclaresChild) - Number(bDeclaresChild);
+	});
+	const edges = dedupeEdges(dedupeOrdered);
+
+	// A genealogy edge produced solely by a declaresChild type (the parent's
+	// note naming the child, e.g. `children: [[Kid]]`) is only as trustworthy
+	// as the parent's own claim unless the child's note names them back (via
+	// any non-declaresChild genealogy type, e.g. `parents: [[Mom]]`). Mark the
+	// unconfirmed ones so downstream neighborhood walks (family-tree,
+	// local/connected graph) let the parent's view reach the child through
+	// them without also letting the child's view reach the parent — see
+	// localSubgraph, connectedComponent, and filterFamilyNeighborhood below.
+	const childConfirmedPairs = new Set<string>();
+	for (const e of rawEdges) {
+		if (!e.genealogy) continue;
+		const type = typeMap.get(e.type.toLowerCase());
+		if (type?.declaresChild) continue;
+		childConfirmedPairs.add(`${e.source}|${e.target}`);
+	}
+	for (const e of edges) {
+		if (e.genealogy && !childConfirmedPairs.has(`${e.source}|${e.target}`)) {
+			e.genealogyOneWay = true;
+		}
+	}
+
 	const nodes: GraphNode[] = [];
 	for (const path of notePaths) {
+		const displayName = phantomNodes.get(path);
+		if (displayName !== undefined) {
+			nodes.push({
+				id: path,
+				label: displayName,
+				tags: [],
+				image: placeholderImage,
+				isPhantom: true,
+			});
+			continue;
+		}
+
 		const f = app.vault.getAbstractFileByPath(path);
 		if (!(f instanceof TFile)) continue;
 		const node = buildNode(app, f, settings);
 		if (node) nodes.push(node);
 	}
 
-	const edges = dedupeEdges(rawEdges.filter(
-		(e) => notePaths.has(e.source) && notePaths.has(e.target),
-	));
-
-	const result = { nodes, edges };
-	if (cache) cache.set(settings, result);
-	return result;
+	const graph = { nodes, edges };
+	if (cache) cache.set(settings, graph);
+	return { graph, aliasMap };
 }
 
 /**
@@ -161,6 +463,13 @@ export function buildFullGraph(
  *
  * The full graph is fetched via the same cache as `buildFullGraph` — local-graph
  * calls from multiple embeds on the same page reuse one scan.
+ *
+ * The global disabled-types filter is applied to the full graph BEFORE the
+ * hop-limited neighborhood is walked, so hop distance reflects only edges the
+ * user can actually see. A note reachable solely through a disabled-type edge
+ * is excluded entirely, rather than surfacing as an orphan kept alive by an
+ * unrelated visible edge of its own. An optional groups filter gets the same
+ * treatment.
  */
 export function buildLocalGraph(
 	app: App,
@@ -168,19 +477,28 @@ export function buildLocalGraph(
 	centerPath: string,
 	depth: number,
 	cache: GraphCache | null = null,
-): RelationsGraph {
-	const full = buildFullGraph(app, settings, cache);
+	groups?: ReadonlySet<string>,
+): GraphBuildResult {
+	const { graph: full, aliasMap } = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
-		// Center note isn't connected — return just it (if it exists) so the view can show "no relationships yet"
 		const f = app.vault.getAbstractFileByPath(centerPath);
 		if (f instanceof TFile) {
 			const node = buildNode(app, f, settings);
-			return { nodes: node ? [node] : [], edges: [] };
+			return { graph: { nodes: node ? [node] : [], edges: [] }, aliasMap };
 		}
-		return { nodes: [], edges: [] };
+		return { graph: { nodes: [], edges: [] }, aliasMap };
 	}
 
-	return localSubgraph(full, centerPath, depth);
+	let filtered = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
+	// A code-block `groups:` filter must also be applied before the hop-limited
+	// walk, same as disabledTypes above — otherwise a note reachable only
+	// through a now-hidden-group edge can pass the hop check and then surface
+	// as an orphan once its connecting edge is stripped (issues: orphaned
+	// nodes with groups filtering).
+	if (groups && groups.size > 0) {
+		filtered = filterGraphByGroups(filtered, groups, centerPath, settings.relationshipTypes);
+	}
+	return { graph: localSubgraph(filtered, centerPath, depth), aliasMap };
 }
 
 /**
@@ -200,12 +518,14 @@ export function localSubgraph(
 		return { nodes: [], edges: [] };
 	}
 
-	// adjacency map (undirected for traversal purposes — we want hops regardless of edge direction)
+	// adjacency map (undirected for traversal purposes — we want hops regardless of edge
+	// direction). Exception: a genealogyOneWay edge only lets the parent (target) reach
+	// the child (source), not the reverse — see the GraphEdge.genealogyOneWay doc.
 	const adj = new Map<string, Set<string>>();
 	for (const e of full.edges) {
 		if (!adj.has(e.source)) adj.set(e.source, new Set());
 		if (!adj.has(e.target)) adj.set(e.target, new Set());
-		adj.get(e.source)!.add(e.target);
+		if (!e.genealogyOneWay) adj.get(e.source)!.add(e.target);
 		adj.get(e.target)!.add(e.source);
 	}
 
@@ -246,10 +566,6 @@ export function localSubgraph(
 /**
  * Filter a graph to only the connected component containing centerPath.
  * Pure function — no app/vault access — for testability.
- *
- * If centerPath isn't a node in the graph, returns an empty graph.
- * Otherwise returns the subgraph of all nodes reachable from centerPath
- * (via any edge, treated as undirected) plus all edges between them.
  */
 export function connectedComponent(
 	graph: RelationsGraph,
@@ -258,11 +574,13 @@ export function connectedComponent(
 	if (!graph.nodes.some((n) => n.id === centerPath)) {
 		return { nodes: [], edges: [] };
 	}
+	// See localSubgraph — a genealogyOneWay edge only lets the parent (target)
+	// reach the child (source), not the reverse.
 	const adj = new Map<string, Set<string>>();
 	for (const e of graph.edges) {
 		if (!adj.has(e.source)) adj.set(e.source, new Set());
 		if (!adj.has(e.target)) adj.set(e.target, new Set());
-		adj.get(e.source)!.add(e.target);
+		if (!e.genealogyOneWay) adj.get(e.source)!.add(e.target);
 		adj.get(e.target)!.add(e.source);
 	}
 	const visited = new Set<string>([centerPath]);
@@ -294,29 +612,41 @@ export function connectedComponent(
  * the vault including disconnected islands) and from `local` (which bounds
  * by hop count).
  *
- * Edge types are not filtered — any edge counts as a connection. A long
- * chain through friends-of-friends or mentor-of-rival will still be followed.
- * For tightly-bounded vaults this is the right thing; for vaults with lots
- * of weak side-relationships the connected component may grow large.
+ * Edge types that are globally disabled are removed from the full graph
+ * BEFORE the component is walked — a note reachable only through a
+ * disabled-type edge is excluded entirely rather than surfacing as a
+ * disconnected-looking orphan kept alive by some other visible edge of its
+ * own. An optional groups filter gets the same treatment. What remains still
+ * follows arbitrarily long chains through friends-of-friends or mentor-of-
+ * rival; only edge types/groups are filtered, not the walk depth. For
+ * tightly-bounded vaults this is the right thing; for vaults with lots of
+ * weak side-relationships the connected component may grow large.
  */
 export function buildConnectedGraph(
 	app: App,
 	settings: RelationsSettings,
 	centerPath: string,
 	cache: GraphCache | null = null,
-): RelationsGraph {
-	const full = buildFullGraph(app, settings, cache);
+	groups?: ReadonlySet<string>,
+): GraphBuildResult {
+	const { graph: full, aliasMap } = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
-		// Center note isn't part of any relationship — return just the focus note
-		// (if it exists on disk) so the view can render a "no relationships yet" state.
 		const f = app.vault.getAbstractFileByPath(centerPath);
 		if (f instanceof TFile) {
 			const node = buildNode(app, f, settings);
-			return { nodes: node ? [node] : [], edges: [] };
+			return { graph: { nodes: node ? [node] : [], edges: [] }, aliasMap };
 		}
-		return { nodes: [], edges: [] };
+		return { graph: { nodes: [], edges: [] }, aliasMap };
 	}
-	return connectedComponent(full, centerPath);
+	let typeFiltered = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
+	// See buildLocalGraph — groups must be filtered before the component walk,
+	// not after, or a note reachable only via a hidden-group edge survives as
+	// an orphan kept alive by its own other visible-group edges.
+	if (groups && groups.size > 0) {
+		typeFiltered = filterGraphByGroups(typeFiltered, groups, centerPath, settings.relationshipTypes);
+	}
+	const filtered = connectedComponent(typeFiltered, centerPath);
+	return { graph: filtered, aliasMap };
 }
 
 /**
@@ -331,6 +661,10 @@ export function buildConnectedGraph(
  *
  * Allies, enemies, mentors etc. are dropped — those don't contribute to the
  * who-had-children-with-whom view that family-graph is for.
+ *
+ * Disabled types and an optional groups filter are both stripped before the
+ * genealogy walk, so a hidden parent/child relationship type or group can't
+ * pull an otherwise-hidden ancestor or descendant into the neighborhood.
  */
 export function buildFamilyNeighborhood(
 	app: App,
@@ -338,19 +672,31 @@ export function buildFamilyNeighborhood(
 	focusPath: string,
 	depth?: number,
 	cache: GraphCache | null = null,
-): RelationsGraph {
-	const full = buildFullGraph(app, settings, cache);
+	groups?: ReadonlySet<string>,
+): GraphBuildResult {
+	const { graph: full, aliasMap } = buildFullGraph(app, settings, cache);
 
 	if (!full.nodes.some((n) => n.id === focusPath)) {
 		const f = app.vault.getAbstractFileByPath(focusPath);
 		if (f instanceof TFile) {
 			const node = buildNode(app, f, settings);
-			return { nodes: node ? [node] : [], edges: [] };
+			return { graph: { nodes: node ? [node] : [], edges: [] }, aliasMap };
 		}
-		return { nodes: [], edges: [] };
+		return { graph: { nodes: [], edges: [] }, aliasMap };
 	}
 
-	return filterFamilyNeighborhood(full, focusPath, depth);
+	// Disabled types are stripped before the genealogy walk so a disabled
+	// parent/child relationship type can't pull an otherwise-hidden ancestor
+	// or descendant into the neighborhood.
+	let typeFiltered = filterGraphByTypes(full, new Set(settings.disabledTypes), focusPath);
+	// Same reasoning for a code-block `groups:` filter — apply it before the
+	// walk so a note reachable only via a hidden-group edge is excluded
+	// entirely rather than surfacing as an orphan.
+	if (groups && groups.size > 0) {
+		typeFiltered = filterGraphByGroups(typeFiltered, groups, focusPath, settings.relationshipTypes);
+	}
+	const filtered = filterFamilyNeighborhood(typeFiltered, focusPath, depth);
+	return { graph: filtered, aliasMap };
 }
 
 export function filterFamilyNeighborhood(
@@ -368,10 +714,17 @@ export function filterFamilyNeighborhood(
 
 	for (const e of full.edges) {
 		if (e.genealogy) {
-			if (!parentsOf.has(e.source)) parentsOf.set(e.source, new Set());
+			// childrenOf is always populated — the parent's own descendant walk
+			// trusts their own declaration regardless of what the child's note
+			// says. parentsOf (the child's ancestor walk) only gets a
+			// genealogyOneWay edge's target when the child's own note confirms
+			// it; see the GraphEdge.genealogyOneWay doc.
 			if (!childrenOf.has(e.target)) childrenOf.set(e.target, new Set());
-			parentsOf.get(e.source)!.add(e.target);
 			childrenOf.get(e.target)!.add(e.source);
+			if (!e.genealogyOneWay) {
+				if (!parentsOf.has(e.source)) parentsOf.set(e.source, new Set());
+				parentsOf.get(e.source)!.add(e.target);
+			}
 		}
 		if (e.pair) {
 			if (!partnersOf.has(e.source)) partnersOf.set(e.source, new Set());
@@ -445,7 +798,7 @@ function buildTypeMap(settings: RelationsSettings): Map<string, RelationshipType
 	return m;
 }
 
-function buildNode(
+export function buildNode(
 	app: App,
 	file: TFile,
 	settings: RelationsSettings,
@@ -475,17 +828,6 @@ function buildNode(
 	return node;
 }
 
-/**
- * Generic frontmatter-string resolver used by the node-badge features
- * (top-left icon, top-right icon, subtext). Returns the trimmed string value
- * of the property, or undefined if any of: property name is blank, property
- * isn't set, the value is array-or-scalar coerces to empty.
- *
- * Coercion matches resolveRingColor for consistency: arrays take their first
- * element; non-string scalars (numbers, booleans) are stringified; whitespace
- * is trimmed. The badge layer renders the result as text — emoji, abbreviation,
- * short title, whatever the user typed.
- */
 export function resolveFrontmatterString(
 	frontmatter: Record<string, unknown> | undefined,
 	propertyName: string,
@@ -502,19 +844,6 @@ export function resolveFrontmatterString(
 	return value;
 }
 
-/**
- * Resolve the ring color for a node based on settings.ringColorProperty and
- * settings.ringColorRules. Returns the matched color, or undefined if no rule
- * applies (feature disabled, property missing, value doesn't match any rule).
- *
- * Frontmatter values come in as strings, arrays, numbers, or booleans — we
- * coerce to a single string and trim before comparing. Array-valued properties
- * use the first element (multi-value matching would need a different settings
- * shape to express). Comparison is case-sensitive on purpose: users typing
- * `Enemy` vs `enemy` may genuinely intend different categories, and we shouldn't
- * silently collapse them. Users who want case-insensitive matching can lowercase
- * their rule values.
- */
 export function resolveRingColor(
 	settings: RelationsSettings,
 	frontmatter: Record<string, unknown> | undefined,
@@ -538,15 +867,6 @@ export function resolveRingColor(
 	return undefined;
 }
 
-/**
- * Resolve the portrait image for a node.
- * Accepts:
- *   - "[[portrait.png]]"   wikilink to a vault image
- *   - "portrait.png"       vault path (relative or absolute)
- *   - "https://..."        external URL
- *   - "data:image/..."     data URL
- * Returns a resource URL Cytoscape can load, or null.
- */
 function resolveImage(
 	app: App,
 	file: TFile,
@@ -563,20 +883,38 @@ function resolveImage(
 	const v = value.trim();
 	if (!v) return null;
 
-	// External URL or data URL — pass through
 	if (/^(https?:|data:)/i.test(v)) return v;
 
-	// Wikilink form: [[file.png]] or [[file.png|alt]]
 	const wikiMatch = v.match(/^\[\[([^\]]+)\]\]$/);
 	const linkPath = wikiMatch ? stripAlias(wikiMatch[1]) : v;
 
-	// Resolve via Obsidian's link resolver (handles relative paths)
 	const resolved = app.metadataCache.getFirstLinkpathDest(linkPath, file.path);
 	if (resolved instanceof TFile) {
 		return app.vault.getResourcePath(resolved);
 	}
 
-	// Fallback: try as a literal vault path
+	const direct = app.vault.getAbstractFileByPath(normalizePath(linkPath));
+	if (direct instanceof TFile) {
+		return app.vault.getResourcePath(direct);
+	}
+
+	return null;
+}
+
+// Resolves settings.phantomPlaceholderImage the same way resolveImage resolves
+// a frontmatter image value — link-style first, then as a literal vault path.
+function resolvePlaceholderImage(app: App, settings: RelationsSettings): string | null {
+	const v = settings.phantomPlaceholderImage.trim();
+	if (!v) return null;
+
+	const wikiMatch = v.match(/^\[\[([^\]]+)\]\]$/);
+	const linkPath = wikiMatch ? stripAlias(wikiMatch[1]) : v;
+
+	const resolved = app.metadataCache.getFirstLinkpathDest(linkPath, "");
+	if (resolved instanceof TFile) {
+		return app.vault.getResourcePath(resolved);
+	}
+
 	const direct = app.vault.getAbstractFileByPath(normalizePath(linkPath));
 	if (direct instanceof TFile) {
 		return app.vault.getResourcePath(direct);
@@ -603,9 +941,36 @@ function hasRequiredTag(cache: CachedMetadata, requiredTags: string[]): boolean 
 }
 
 export function extractLinkTargets(value: unknown): string[] {
+	return extractLinkRefs(value).map((ref) => ref.target);
+}
+
+export function stripAlias(link: string): string {
+	const pipeIdx = link.indexOf("|");
+	if (pipeIdx >= 0) link = link.slice(0, pipeIdx);
+	const hashIdx = link.indexOf("#");
+	if (hashIdx >= 0) link = link.slice(0, hashIdx);
+	return link.trim();
+}
+
+// A single frontmatter link, resolved down to the raw target text (what
+// getFirstLinkpathDest is called with, and what a phantom node's id becomes
+// when nothing resolves) plus the text a node should display for it.
+export interface LinkRef {
+	target: string;
+	displayName: string;
+}
+
+/**
+ * Same value shapes as extractLinkTargets (single wikilink, multiple
+ * wikilinks, comma-separated plain text, arrays/nesting of any of those),
+ * but keeps the alias half of `[[Target|Display]]` links alongside the
+ * target instead of discarding it — phantom nodes need something to show
+ * as a label since they have no file basename to fall back on.
+ */
+export function extractLinkRefs(value: unknown): LinkRef[] {
 	if (value == null) return [];
 	if (Array.isArray(value)) {
-		return value.flatMap((v) => extractLinkTargets(v));
+		return value.flatMap((v) => extractLinkRefs(v));
 	}
 	if (typeof value !== "string") return [];
 
@@ -615,22 +980,30 @@ export function extractLinkTargets(value: unknown): string[] {
 	const wikiRegex = /\[\[([^\]]+)\]\]/g;
 	const matches = [...s.matchAll(wikiRegex)];
 	if (matches.length > 0) {
-		return matches.map((m) => stripAlias(m[1]));
+		return matches.map((m) => wikilinkRef(m[1]));
 	}
 
 	if (s.includes(",")) {
-		return s.split(",").map((part) => stripAlias(part.trim())).filter(Boolean);
+		return s
+			.split(",")
+			.map((part) => stripAlias(part.trim()))
+			.filter(Boolean)
+			.map((target) => ({ target, displayName: target }));
 	}
 
-	return [stripAlias(s)];
+	const target = stripAlias(s);
+	return [{ target, displayName: target }];
 }
 
-export function stripAlias(link: string): string {
-	const pipeIdx = link.indexOf("|");
-	if (pipeIdx >= 0) link = link.slice(0, pipeIdx);
-	const hashIdx = link.indexOf("#");
-	if (hashIdx >= 0) link = link.slice(0, hashIdx);
-	return link.trim();
+// content is the text between [[ and ]], e.g. "Arthur", "Arthur#Background",
+// or "Arthur|King Arthur#Background".
+function wikilinkRef(content: string): LinkRef {
+	const target = stripAlias(content);
+	const pipeIdx = content.indexOf("|");
+	if (pipeIdx < 0) return { target, displayName: target };
+
+	const alias = stripAlias(content.slice(pipeIdx + 1));
+	return { target, displayName: alias || target };
 }
 
 export function dedupeEdges(edges: GraphEdge[]): GraphEdge[] {

@@ -178,6 +178,7 @@ export class RelationsView extends ItemView {
 		if (!this.canvas) return;
 
 		let graph: RelationsGraph;
+		let aliasMap;
 		let highlightId: string | undefined;
 		let useTree = false;
 
@@ -187,20 +188,26 @@ export class RelationsView extends ItemView {
 				this.showEmpty("No active note. Open a note to see its relationships.");
 				return;
 			}
-			graph = buildLocalGraph(this.app, this.plugin.settings, active.path, this.currentLocalDepth, this.plugin.graphCache);
+			// buildLocalGraph applies the disabled-types filter internally, before
+			// the hop-limited neighborhood is walked, so a note reachable only via
+			// a disabled-type edge is excluded entirely rather than surfacing as an
+			// orphan kept alive by some other edge of its own.
+			const localResult = buildLocalGraph(this.app, this.plugin.settings, active.path, this.currentLocalDepth, this.plugin.graphCache);
+			graph = localResult.graph;
+			aliasMap = localResult.aliasMap;
 			highlightId = active.path;
 		} else {
-			graph = buildFullGraph(this.app, this.plugin.settings, this.plugin.graphCache);
+			// `full` has no hop-limiting to worry about, so filtering order doesn't
+			// matter — apply the type filter here before measuring/rendering, so
+			// node counts, layout and the subtitle reflect only what's shown.
+			const fullResult = buildFullGraph(this.app, this.plugin.settings, this.plugin.graphCache);
+			graph = filterGraphByTypes(
+				fullResult.graph,
+				new Set(this.plugin.settings.disabledTypes),
+				highlightId,
+			);
+			aliasMap = fullResult.aliasMap;
 		}
-
-		// Apply the type filter before measuring/rendering, so node counts, layout
-		// and the subtitle reflect only what's actually shown. The active note
-		// (local mode) is kept even if filtering would otherwise isolate it.
-		graph = filterGraphByTypes(
-			graph,
-			new Set(this.plugin.settings.disabledTypes),
-			highlightId,
-		);
 
 		if (this.mode === "local") {
 			const active = this.app.workspace.getActiveFile();
@@ -232,6 +239,8 @@ export class RelationsView extends ItemView {
 			useTreeLayout: useTree,
 			labelStore: this.plugin,
 			editableLabels: true,
+			aliasMap,
+			centerPath: highlightId,
 		});
 
 		this.renderLegend();

@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { App, TFile } from "obsidian";
-import { buildFullGraph, dedupeEdges, filterFamilyNeighborhood } from "../src/graph";
+import {
+	buildFullGraph,
+	connectedComponent,
+	dedupeEdges,
+	filterFamilyNeighborhood,
+	localSubgraph,
+} from "../src/graph";
 import type { GraphEdge, RelationsSettings, RelationshipType } from "../src/types";
 import { DEFAULT_SETTINGS } from "../src/types";
 
@@ -94,7 +100,7 @@ describe("declaresChild normalization (issue #21)", () => {
 			{ path: "Parent.md", frontmatter: { children: ['[[Kid]]'] } },
 			{ path: "Kid.md", frontmatter: {} },
 		]);
-		const graph = buildFullGraph(app, settingsWith([genType("children", { declaresChild: true })]));
+		const { graph } = buildFullGraph(app, settingsWith([genType("children", { declaresChild: true })]));
 		expect(edgePairs(graph.edges)).toEqual(["Kid.md->Parent.md"]);
 	});
 
@@ -103,7 +109,7 @@ describe("declaresChild normalization (issue #21)", () => {
 			{ path: "Parent.md", frontmatter: { children: ['[[Kid]]'] } },
 			{ path: "Kid.md", frontmatter: {} },
 		]);
-		const graph = buildFullGraph(app, settingsWith([genType("children", { declaresChild: true })]));
+		const { graph } = buildFullGraph(app, settingsWith([genType("children", { declaresChild: true })]));
 		expect(graph.edges[0].type).toBe("children");
 	});
 
@@ -112,7 +118,7 @@ describe("declaresChild normalization (issue #21)", () => {
 			{ path: "A.md", frontmatter: { knows: ['[[B]]'] } },
 			{ path: "B.md", frontmatter: {} },
 		]);
-		const graph = buildFullGraph(
+		const { graph } = buildFullGraph(
 			app,
 			settingsWith([genType("knows", { genealogy: false, declaresChild: true })]),
 		);
@@ -124,7 +130,7 @@ describe("declaresChild normalization (issue #21)", () => {
 			{ path: "Kid.md", frontmatter: { parents: ['[[Parent]]'] } },
 			{ path: "Parent.md", frontmatter: {} },
 		]);
-		const graph = buildFullGraph(app, settingsWith([genType("parents")]));
+		const { graph } = buildFullGraph(app, settingsWith([genType("parents")]));
 		expect(edgePairs(graph.edges)).toEqual(["Kid.md->Parent.md"]);
 	});
 
@@ -133,7 +139,7 @@ describe("declaresChild normalization (issue #21)", () => {
 		// `parents: [[Amalayin]]` — one bond, one edge (issue #21's
 		// "redundant and conflicting edges").
 		const app = makeFakeApp(ISSUE_21_VAULT);
-		const graph = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
 		const between = graph.edges.filter(
 			(e) =>
 				(e.source === "Varinka.md" && e.target === "Amalayin.md") ||
@@ -148,7 +154,7 @@ describe("declaresChild normalization (issue #21)", () => {
 		// Twice is declared only by Varinka's `children:`; Twice.md itself has
 		// an empty parents array. Previously invisible to family views.
 		const app = makeFakeApp(ISSUE_21_VAULT);
-		const graph = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
 		expect(graph.nodes.map((n) => n.id).sort()).toEqual([
 			"Amalayin.md", "Twice.md", "Varinka.md",
 		]);
@@ -158,9 +164,50 @@ describe("declaresChild normalization (issue #21)", () => {
 		]);
 	});
 
+	it("resolves a both-sides-declared bond to the child-declared type, regardless of scan order", () => {
+		// dedupeEdges keeps whichever raw edge for a pair was scanned first.
+		// Which file Obsidian's vault scan lists first shouldn't be able to flip
+		// which type -- and therefore which color -- represents the bond, since
+		// family-connectors.ts's family-tree view reads the type/color off
+		// whichever genealogy edge happens to be first in the final array.
+		const declaresChildFirst = makeFakeApp([
+			{ path: "Amalayin.md", frontmatter: { children: ['[[Varinka]]'] } },
+			{ path: "Varinka.md", frontmatter: { parents: ['[[Amalayin]]'] } },
+		]);
+		const childDeclaredFirst = makeFakeApp([
+			{ path: "Varinka.md", frontmatter: { parents: ['[[Amalayin]]'] } },
+			{ path: "Amalayin.md", frontmatter: { children: ['[[Varinka]]'] } },
+		]);
+
+		for (const app of [declaresChildFirst, childDeclaredFirst]) {
+			const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+			const bond = graph.edges.find(
+				(e) => e.source === "Varinka.md" && e.target === "Amalayin.md",
+			);
+			expect(bond?.type).toBe("parents");
+		}
+	});
+
+	it("keeps a child-declared bond ahead of an unrelated declares-child-only pair in the edge list", () => {
+		// family-connectors.ts draws the whole family tree in ONE shared color,
+		// read from graph.edges.find(e => e.genealogy) -- whichever genealogy
+		// edge is first. Varinka->Twice has no complementary `parents:`
+		// declaration at all (Twice.md's is empty), so it must never be able to
+		// out-rank the mutually-declared Varinka/Amalayin bond just because its
+		// file happened to scan first.
+		const app = makeFakeApp([
+			{ path: "Varinka.md", frontmatter: { parents: ['[[Amalayin]]'], children: ['[[Twice]]'] } },
+			{ path: "Amalayin.md", frontmatter: { children: ['[[Varinka]]'] } },
+			{ path: "Twice.md", frontmatter: { parents: [] } },
+		]);
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const firstGenealogyEdge = graph.edges.find((e) => e.genealogy);
+		expect(firstGenealogyEdge?.type).toBe("parents");
+	});
+
 	it("family neighborhood from the grandparent reaches the children-only grandchild", () => {
 		const app = makeFakeApp(ISSUE_21_VAULT);
-		const graph = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
 		const family = filterFamilyNeighborhood(graph, "Amalayin.md");
 		expect(family.nodes.map((n) => n.id).sort()).toEqual([
 			"Amalayin.md", "Twice.md", "Varinka.md",
@@ -171,14 +218,14 @@ describe("declaresChild normalization (issue #21)", () => {
 		// Issue #21's expected behaviour, stated directly: declaring from the
 		// parent side only, the child side only, or both sides must all yield
 		// the same nodes and edges.
-		const parentSideOnly = buildFullGraph(
+		const { graph: parentSideOnly } = buildFullGraph(
 			makeFakeApp([
 				{ path: "Amalayin.md", frontmatter: { children: ['[[Varinka]]'] } },
 				{ path: "Varinka.md", frontmatter: {} },
 			]),
 			settingsWith(ISSUE_21_TYPES),
 		);
-		const childSideOnly = buildFullGraph(
+		const { graph: childSideOnly } = buildFullGraph(
 			makeFakeApp([
 				{ path: "Amalayin.md", frontmatter: {} },
 				{ path: "Varinka.md", frontmatter: { parents: ['[[Amalayin]]'] } },
@@ -229,5 +276,114 @@ describe("dedupeEdges genealogy pair-dedupe", () => {
 			lineStyle: "solid", genealogy: false,
 		});
 		expect(dedupeEdges([ally("A", "B"), ally("B", "A")])).toHaveLength(1);
+	});
+});
+
+/**
+ * A parent-declared ("declaresChild") bond with no reciprocal declaration on
+ * the child's own note is trusted only for traversal starting at the parent —
+ * the parent's own family-tree/local/connected-graph view reaches the child,
+ * but the child's view does not reach the parent. This stops a unilateral
+ * `children:` claim from pulling the "child" — and everyone connected to
+ * them — into every view of the claiming parent, while still letting the
+ * parent's own descendant chain (and views centered above the parent) work.
+ * A plain child-declared type (e.g. `parents:`) or a mutually-declared bond
+ * is unaffected — both keep working bidirectionally as always.
+ */
+function allyType(name: string): RelationshipType {
+	return {
+		name,
+		color: "#22c55e",
+		symmetric: true,
+		pair: false,
+		treeLayout: false,
+		lineStyle: "solid",
+		genealogy: false,
+	};
+}
+
+describe("genealogyOneWay: unreciprocated declares-child bonds don't grant upward reach", () => {
+	it("tags an edge genealogyOneWay when only the parent's side declares it", () => {
+		const app = makeFakeApp(ISSUE_21_VAULT);
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const twiceToVarinka = graph.edges.find(
+			(e) => e.source === "Twice.md" && e.target === "Varinka.md",
+		);
+		expect(twiceToVarinka?.genealogyOneWay).toBe(true);
+	});
+
+	it("does not tag a mutually-declared edge genealogyOneWay", () => {
+		const app = makeFakeApp(ISSUE_21_VAULT);
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const varinkaToAmalayin = graph.edges.find(
+			(e) => e.source === "Varinka.md" && e.target === "Amalayin.md",
+		);
+		expect(varinkaToAmalayin?.genealogyOneWay).toBeFalsy();
+	});
+
+	it("does not tag a plain child-declared type genealogyOneWay, even unreciprocated", () => {
+		// The default single-genealogy-type setup (just `parent:`, declaresChild
+		// unset) has no complementary declaresChild type to reciprocate with —
+		// it must keep working exactly as it always has.
+		const app = makeFakeApp([
+			{ path: "Kid.md", frontmatter: { parent: ['[[Mom]]'] } },
+			{ path: "Mom.md", frontmatter: {} },
+		]);
+		const { graph } = buildFullGraph(app, settingsWith([genType("parent")]));
+		expect(graph.edges[0].genealogyOneWay).toBeFalsy();
+	});
+
+	it("family neighborhood from the parent reaches the unconfirmed child", () => {
+		const app = makeFakeApp(ISSUE_21_VAULT);
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const fromVarinka = filterFamilyNeighborhood(graph, "Varinka.md");
+		expect(fromVarinka.nodes.map((n) => n.id).sort()).toEqual([
+			"Amalayin.md", "Twice.md", "Varinka.md",
+		]);
+	});
+
+	it("family neighborhood from the unconfirmed child does not reach the parent", () => {
+		const app = makeFakeApp(ISSUE_21_VAULT);
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+		const fromTwice = filterFamilyNeighborhood(graph, "Twice.md");
+		expect(fromTwice.nodes.map((n) => n.id)).toEqual(["Twice.md"]);
+	});
+
+	it("local graph centered on the unconfirmed child does not pull in the parent (or the parent's other connections)", () => {
+		const app = makeFakeApp([
+			{ path: "Amalayin.md", frontmatter: { children: ['[[Varinka]]'] } },
+			{
+				path: "Varinka.md",
+				frontmatter: {
+					parents: ['[[Amalayin]]'],
+					children: ['[[Twice]]'],
+					allies: ['[[Garath]]'],
+				},
+			},
+			{ path: "Twice.md", frontmatter: { parents: [] } },
+			{ path: "Garath.md", frontmatter: {} },
+		]);
+		const { graph } = buildFullGraph(app, settingsWith([...ISSUE_21_TYPES, allyType("allies")]));
+
+		const fromTwice = localSubgraph(graph, "Twice.md", 2);
+		expect(fromTwice.nodes.map((n) => n.id)).toEqual(["Twice.md"]);
+
+		const fromVarinka = localSubgraph(graph, "Varinka.md", 2);
+		expect(fromVarinka.nodes.map((n) => n.id).sort()).toEqual([
+			"Amalayin.md", "Garath.md", "Twice.md", "Varinka.md",
+		]);
+	});
+
+	it("connected component containing the unconfirmed child excludes the parent", () => {
+		const app = makeFakeApp(ISSUE_21_VAULT);
+		const { graph } = buildFullGraph(app, settingsWith(ISSUE_21_TYPES));
+
+		const fromTwice = connectedComponent(graph, "Twice.md");
+		expect(fromTwice.nodes.map((n) => n.id)).toEqual(["Twice.md"]);
+
+		const fromVarinka = connectedComponent(graph, "Varinka.md");
+		expect(fromVarinka.nodes.map((n) => n.id).sort()).toEqual([
+			"Amalayin.md", "Twice.md", "Varinka.md",
+		]);
 	});
 });

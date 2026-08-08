@@ -42,6 +42,8 @@ function makeSettings(
 		bottomLeftIconProperty: "",
 		bottomRightIconProperty: "",
 		subtextProperty: "",
+		organizationHierarchies: [],
+		phantomPlaceholderImage: "",
 	};
 }
 

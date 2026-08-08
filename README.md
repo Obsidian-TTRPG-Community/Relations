@@ -8,7 +8,7 @@ Visualise relationships between notes — for **worldbuilding**, **fiction**, **
 
 <img width="709" height="810" alt="image" src="https://github.com/user-attachments/assets/938811de-7ead-4468-a994-87059f815126" />
 
-[Install](#install) · [Quick start](#quick-start) · [Embedding](#embedding-a-graph-in-a-note) · [Family views](#family-views) · [Legend](#the-legend) · [Settings](#relationship-types)
+[Install](#install) · [Quick start](#quick-start) · [Embedding](#embedding-a-graph-in-a-note) · [Family views](#family-views) · [Organization hierarchies](#organization-hierarchies) · [Legend](#the-legend) · [Settings](#relationship-types) · [Phantom nodes](#phantom-nodes)
 
 </div>
 
@@ -117,17 +117,20 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | Option        | Default                | Notes                                                                          |
 |---------------|------------------------|--------------------------------------------------------------------------------|
 | `size`        | `small`                | `mini` (~160px tall, infobox-friendly), `small` (~320px), `large` (~600px)    |
-| `depth`       | size-dependent         | hops from the focus note. `mini` is forced to 1; `small` defaults to 1; `large` defaults to 3. Only relationships reachable within `depth` hops are drawn — `depth: 1` is the focus note's own relationships (hub-and-spoke), cross-links between two outermost nodes wait until the next depth. An explicit `depth` also bounds `scope: connected` |
-| `scope`       | `local`                | `local` (this note + N hops), `connected` (everyone transitively linked to this note; bounded by `depth` if you set one) or `full` (entire vault) |
+| `depth`       | size-dependent         | hops from the focus note. `mini` is forced to 1; `small` defaults to 1; `large` defaults to 3 |
+| `scope`       | `local`                | `local` (this note + N hops) or `full` (entire vault)                          |
 | `tree`        | `false`                | generic top-down dagre layout for any graph — not family-specific              |
 | `family-graph`| `false`                | family view, **graph-style**: generation-aligned, drawn with Cytoscape edges (marriage / informal partnership / parent→child). [See below](#family-views). |
 | `family-tree` | `false`                | family view, **true tree**: generation-aligned, drawn with orthogonal right-angle connectors. [See below](#family-views). |
+| `org-graph`   | —                      | render a settings-defined [organization hierarchy](#organization-hierarchies) by name, force-directed layout. Replaces the relationship graph entirely for this block. |
+| `org-tree`    | —                      | same, but top-down dagre layout instead of force-directed. |
 | `zoom`        | `1.0`, `1.4` for mini  | zoom multiplier applied after fit. `1.5` or `"150%"` zooms in 50%             |
 | `height`      | size default           | override the embed's height. Accepts `px`, `em`, `rem`, `vh`, `vw`, or `%`     |
 | `center`      | host note              | wikilink or path of a different note to focus on, e.g. `"[[King Arthur]]"`     |
 | `labels`      | (inherits setting)     | `true`/`false` to show or hide note names under nodes for this block, overriding the global **Show node labels** setting |
 | `spacing`     | `1.0` (`0.55` in mini) | family views only: node spacing multiplier. Lower = tighter tree with shorter edges and larger nodes (good for infoboxes); higher = more spread out. Range `0.2`–`3` |
 | `id`          | none                   | a stable identifier for this block. Required to **lock** the layout — see below |
+| `groups`      | none (no filtering)    | show only edges whose relationship type is in one of these groups (OR logic), e.g. `groups: "Social, Bond"` or `groups: ["Social", "Bond"]`. Strict match — ungrouped types are excluded once this is set. Groups are defined per relationship type in **Settings**. Composes with the global type filter, which is applied first |
 
 ## Family views
 
@@ -206,6 +209,93 @@ spacing: 0.5
 
 Lower values pull nodes closer together (shorter edges, larger nodes once the view fits); higher values spread them out. The accepted range is `0.2` to `3.0`.
 
+## Organization hierarchies
+
+Beyond typed relationships, Relations can render a **rank structure** for a single note — an adventuring party's chain of command, a guild's ranks, a military hierarchy — using hierarchies you define yourself, instead of one hardcoded shape.
+
+### Define a hierarchy
+
+In **Settings → Relations → Organization hierarchies**, click **Add hierarchy**, name it (e.g. "Guild Ranks"), then define its levels:
+
+| Level | Name       | Color                | Line   |
+|-------|------------|-----------------------|--------|
+| 1     | Master     | `#dc2626` red         | solid  |
+| 2     | Journeyman | `#3b82f6` blue        | solid  |
+| 3     | Apprentice | `#22c55e` green       | solid  |
+
+- **Level** — position in the hierarchy (1 = top). Gaps (1, 2, 5) are fine; levels always display sorted by number.
+- **Color** — the legend swatch color; also the ring color when a level has one member, or the hub node's fill color when it has several.
+- **Line** — `solid` / `dashed` / `dotted` / `double`, for the connector from this level up to the level above it.
+- **Self** (checkbox) — if this level's field is empty on the note, show the note itself as this level's member instead of skipping the level. Off by default. Useful when the note the code block lives on IS the top of the hierarchy — see [below](#the-note-itself-as-the-top-level).
+
+At least two levels are required, and level numbers and names must be unique.
+
+### Use it on a Group note
+
+A level's name converts to a frontmatter field — lowercase, spaces become underscores (`Guild Masters` → `guild_masters`). List members under those fields:
+
+```yaml
+---
+tags: [Category/Group]
+master: "[[The Shadowhand]]"
+journeyman:
+  - "[[Vex]]"
+  - "[[Morath]]"
+apprentice:
+  - "[[Kess]]"
+  - "[[Dorn]]"
+  - "[[Lira]]"
+---
+```
+
+Then render it, the same way you'd embed any other graph:
+
+````markdown
+```relations
+org-tree: Guild Ranks
+```
+````
+
+`org-tree` lays the hierarchy out top-down (dagre); swap it for `org-graph` to lay it out force-directed instead — the same split as `family-tree`/`family-graph`. If both are set, `org-tree` wins.
+
+> [!TIP]
+> Command palette → **Insert organization hierarchy code block** drops in an editable `org-tree: Hierarchy Name` block (with `org-graph` included as a commented alternative) so you don't have to type the fences by hand.
+
+### How it renders
+
+- A level with a **single** member shows that member's own portrait directly, ringed in the level's color — no redundant placeholder node for a party of one.
+- A level with **multiple** members gets a colored hub node labeled with the level's name — always visible regardless of the **Show node labels** setting, since it's structural information rather than decoration — with thin connectors fanning out to each member.
+- Levels chain top-down, one connector per level pair, styled with the lower level's line setting.
+- A level with no data on the note is skipped entirely — no empty box in the graph.
+- An unresolved link (a typo'd wikilink, or a name with no matching note) still renders as a plain node instead of silently disappearing, so the mistake is visible.
+
+Clicking a member node opens that note, same as any other graph; hub nodes aren't real notes, so clicking one does nothing. Layout locking, pan/zoom, and both layout engines all work the same as everywhere else in the plugin.
+
+If the code block names a hierarchy that isn't configured, or the note has no data for any level of the named hierarchy, you'll get an inline error instead of a blank graph.
+
+### The note itself as the top level
+
+Some hierarchies don't have a natural note to name at the top — a worship hierarchy's top level is the deity, and the deity's own page is where you'd embed the graph. There's nothing to link to; the note itself IS that level.
+
+Check **Self** on that level in the settings modal, and when its frontmatter field is empty, the note the code block is embedded on stands in as that level's sole member instead of the level being skipped:
+
+```yaml
+# Solari.md
+worshippers:
+  - "[[Kess]]"
+  - "[[Dorn]]"
+```
+
+````markdown
+```relations
+org-tree: Worship Hierarchy
+```
+````
+
+With **Self** checked on "Deity" and no `deity:` field on the note, Solari's own page appears at the top, ringed in the Deity level's color, chained down to the Worshippers hub — same as if `deity: "[[Solari]]"` had been declared explicitly. If a `deity:` field *is* present, it's used as normal; the note only stands in when the field is empty.
+
+This also means a note using only the top level (nothing else filled in) still renders instead of showing "No members found" — the host note counts as that level's data.
+
 ## The legend
 
 When **Show legend** is enabled (Settings → Relations, on by default), non-`mini` graphs show a legend strip listing every relationship type present in the view, each with its colour swatch drawn in that type's line style, plus a small symbol for one-way (→) and paired (⚭) types.
@@ -253,7 +343,6 @@ Configure types in **Settings → Relations**. Each type has a name (= frontmatt
 | **Pair**     | Pulls paired nodes very close, with a heavy connector. Use for `spouse`, `partner`, `bonded`.                            |
 | **Tree**     | When this type dominates a graph (≥60% of edges), auto-switches to top-down layout.                                       |
 | **Gen**      | Genealogy — counts as a bloodline edge in the family views (`family-tree` / `family-graph`). Typically `parent`. |
-| **Child**    | For Gen types only: this property is written on the **parent's** note and names the child (e.g. a `children:` property). Relations flips the edge internally so it doesn't matter which side of a bond is declared — parent-side, child-side, or both produce the same tree, and a bond declared from both sides draws as a single line. |
 | **Line**     | `solid`, `dashed`, `dotted`, or `double`. Useful for marking "secret", "former", "rumored" relationships.               |
 
 Defaults shipped:
@@ -278,7 +367,7 @@ Rename, recolour, add, or delete freely — they're just defaults.
 
 ## Portraits
 
-The portrait property name is configurable in settings (default: `npcimage`). Accepted forms:
+The frontmatter property name is configurable via **Portrait property** in Settings → Relations (default: `npcimage`). Accepted forms:
 
 ```yaml
 npcimage: "[[merlin.png]]"                     # vault wikilink (recommended)
@@ -316,6 +405,28 @@ For stricter scoping, set **Folder scope** or **Required tags** in settings:
 Useful if your vault has lots of incidental wikilinks you don't want polluting the graph.
 
 </details>
+
+## Phantom nodes
+
+A relationship can point at a note that doesn't exist yet — you wrote `ally: "[[Bob]]"` before creating Bob's note, or he's a background character you never plan to write up. Rather than silently dropping the reference, Relations still draws it, as a **phantom node**: faded (50% opacity) with a dashed border, so it reads as "not a real note yet" at a glance.
+
+The phantom's id and default label are the link text exactly as written — not lowercased or otherwise normalised — so it matches what you'd type to actually create the note. An alias (`[[Bob|Bobby]]`) still labels the node with the alias; the id underneath stays `Bob`. Once you create a note that resolves the link, it stops appearing as a phantom on the next refresh and behaves like any other note.
+
+### Placeholder image
+
+By default a phantom node has no portrait, just its label. To give phantoms a generic placeholder image (a silhouette, a question mark, whatever suits your vault), set **Phantom placeholder image** in Settings → Relations:
+
+```yaml
+z_Assets/Placeholder_Person.png     # vault path
+[[Placeholder_Person.png]]          # wikilink — resolved the same way as the Portrait property
+```
+
+- Leave it blank to render phantom nodes with no image at all.
+- Unlike the **Portrait property** setting (frontmatter key, default `npcimage`), this field does **not** accept an external URL — only a vault path or a wikilink to a file in your vault.
+- It's a single global setting, not per-relationship-type or per-note: every phantom in the graph uses the same placeholder, since a phantom has no frontmatter of its own to read one from.
+- Phantom nodes never pick up a ring color, even if you have ring-color rules configured — those are resolved from frontmatter too, and phantoms have none.
+
+Clicking a phantom node currently does nothing, since it isn't pointed at a file yet.
 
 ## Building from source
 

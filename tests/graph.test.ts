@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractLinkTargets, stripAlias, dedupeEdges } from "../src/graph";
+import { extractLinkTargets, extractLinkRefs, stripAlias, dedupeEdges } from "../src/graph";
 import type { GraphEdge } from "../src/types";
 
 function edge(overrides: Partial<GraphEdge> & Pick<GraphEdge, "source" | "target" | "type">): GraphEdge {
@@ -98,6 +98,56 @@ describe("extractLinkTargets", () => {
 		expect(extractLinkTargets([["[[Arthur]]"], "[[Merlin]]"])).toEqual([
 			"Arthur", "Merlin",
 		]);
+	});
+});
+
+describe("extractLinkRefs", () => {
+	it("uses the target as displayName when there's no alias", () => {
+		expect(extractLinkRefs("[[Arthur]]")).toEqual([
+			{ target: "Arthur", displayName: "Arthur" },
+		]);
+		expect(extractLinkRefs("Arthur")).toEqual([
+			{ target: "Arthur", displayName: "Arthur" },
+		]);
+	});
+
+	it("preserves case in both target and displayName", () => {
+		expect(extractLinkRefs("[[ARTHUR pendragon]]")).toEqual([
+			{ target: "ARTHUR pendragon", displayName: "ARTHUR pendragon" },
+		]);
+	});
+
+	it("uses the alias as displayName, keeping the pre-pipe text as target", () => {
+		expect(extractLinkRefs("[[Arthur|King Arthur]]")).toEqual([
+			{ target: "Arthur", displayName: "King Arthur" },
+		]);
+	});
+
+	it("strips a heading anchor from the alias half too", () => {
+		expect(extractLinkRefs("[[Arthur|King Arthur#Background]]")).toEqual([
+			{ target: "Arthur", displayName: "King Arthur" },
+		]);
+	});
+
+	it("gives each multi-wikilink match its own displayName", () => {
+		expect(extractLinkRefs("[[Arthur|King]] and [[Merlin]]")).toEqual([
+			{ target: "Arthur", displayName: "King" },
+			{ target: "Merlin", displayName: "Merlin" },
+		]);
+	});
+
+	it("comma-separated plain text has no alias, so displayName equals target", () => {
+		expect(extractLinkRefs("Arthur, Merlin")).toEqual([
+			{ target: "Arthur", displayName: "Arthur" },
+			{ target: "Merlin", displayName: "Merlin" },
+		]);
+	});
+
+	it("underlies extractLinkTargets — targets match exactly", () => {
+		const value = "[[Arthur|King Arthur]] and [[Merlin]]";
+		expect(extractLinkRefs(value).map((r) => r.target)).toEqual(
+			extractLinkTargets(value),
+		);
 	});
 });
 

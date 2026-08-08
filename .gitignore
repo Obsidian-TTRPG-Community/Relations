@@ -17,3 +17,10 @@ coverage/
 
 # Note: main.js, manifest.json, styles.css are intentionally tracked —
 # the repo ships them and BRAT/manual installs read them.
+.prettierrc
+
+# Local build/lockfile drift from contributor machines — main.js is a
+# maintainer release-build artifact, not something feature PRs should touch.
+main.js
+package-lock.json
+tsconfig.json

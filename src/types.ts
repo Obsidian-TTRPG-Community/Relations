@@ -16,14 +16,61 @@ export interface RelationshipType {
 	// (issue #21: without this, children-declared kids vanish from family
 	// views or corrupt the tree). Ignored when genealogy is false.
 	declaresChild?: boolean;
-	// Optional grouping label. Purely cosmetic: types sharing a group are
-	// clustered under a heading in the legend (e.g. put `parent` and `family`
-	// in a "Family" group). Empty/undefined means ungrouped. Does not affect
-	// graph structure, so it's excluded from the cache signature.
+	// Optional grouping label. Types sharing a group are clustered under a
+	// heading in the legend (e.g. put `parent` and `family` in a "Family"
+	// group), and can be targeted by a code block's `groups:` filter option
+	// (see filterGraphByGroups in graph.ts) — matching there is strict, so an
+	// ungrouped type is excluded whenever a groups: filter is active. Empty/
+	// undefined means ungrouped. Doesn't affect which edges exist in the built
+	// graph (filtering happens post-build against live settings), so it's
+	// still excluded from the cache signature.
 	group?: string;
 }
 
 export type GraphMode = "full" | "local";
+
+/**
+ * One rank in a user-defined organization hierarchy (e.g. "Party Structure":
+ * 1=Leader, 2=Officers, 3=Members, 4=Initiates). `level` is a positive integer;
+ * gaps are allowed (1, 2, 5) and levels are always displayed sorted by number
+ * regardless of entry/storage order. `name` is converted to a frontmatter field
+ * name via toFieldName() in organization-hierarchies.ts (e.g. "Guild Masters" →
+ * "guild_masters") — that's the property a Group note's frontmatter must use to
+ * list members at this level.
+ */
+export interface OrganizationLevel {
+	level: number;
+	name: string;
+	// Hex color for this level's legend swatch and rendered nodes (ring color on
+	// a single-member level, fill color on a multi-member level's hub node).
+	// Optional so hierarchies predating this field still load; missing colors
+	// fall back to a default palette by level position — see defaultLevelColor
+	// in organization-hierarchies.ts.
+	color?: string;
+	// Line style for the connector edge from this level up to the level above
+	// it (e.g. dashed to mark an "acting"/provisional rank). Mirrors
+	// RelationshipType.lineStyle. Optional; missing values render solid.
+	lineStyle?: LineStyle;
+	// When this level's frontmatter field is empty/absent, show the host note
+	// itself as this level's sole member instead of skipping the level. Useful
+	// when the note the code block lives on IS the top of the hierarchy (e.g. a
+	// Deity's own page as the top of its worship hierarchy) rather than
+	// something that would name itself in its own frontmatter. Off by default —
+	// most levels (e.g. a group's "Leader") should still just skip when empty.
+	useHostNoteIfEmpty?: boolean;
+}
+
+/**
+ * A user-defined organization hierarchy, configured in settings and referenced
+ * by Group notes via a `relations` code block's `org:` parameter. Distinct from
+ * relationshipTypes: hierarchies describe rank structure within a single group
+ * note (frontmatter fields named after each level), not relationships between
+ * notes.
+ */
+export interface OrganizationHierarchy {
+	name: string;
+	levels: OrganizationLevel[];
+}
 
 /**
  * One rule in the ring-color mapping: when a node's value of the configured
@@ -92,6 +139,15 @@ export interface RelationsSettings {
 	bottomLeftIconProperty: string;
 	bottomRightIconProperty: string;
 	subtextProperty: string;
+
+	// User-defined organization hierarchies (rank structures like "Party
+	// Structure" or "Guild Ranks"). Referenced by Group notes via a `relations`
+	// code block's `org:` parameter — see organization-hierarchies.ts.
+	organizationHierarchies: OrganizationHierarchy[];
+
+	// Vault path to the image shown on phantom nodes (unresolved link targets
+	// with no matching file). Empty = phantom nodes render with no image.
+	phantomPlaceholderImage: string;
 }
 
 export const DEFAULT_SETTINGS: RelationsSettings = {
@@ -134,7 +190,38 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 	bottomLeftIconProperty: "",
 	bottomRightIconProperty: "",
 	subtextProperty: "",
+	organizationHierarchies: [
+		{
+			name: "Hierarchy",
+			levels: [
+				{ level: 1, name: "Leader", color: "#dc2626", lineStyle: "solid" },
+				{ level: 2, name: "Officers", color: "#3b82f6", lineStyle: "solid" },
+				{ level: 3, name: "Members", color: "#22c55e", lineStyle: "solid" },
+				{ level: 4, name: "Initiates", color: "#eab308", lineStyle: "solid" },
+			],
+		},
+	],
+	phantomPlaceholderImage: "",
 };
+
+/**
+ * Represents a parsed link from frontmatter.
+ * Supports multiple formats: plain text, wikilinks, and aliased links.
+ *
+ * Example:
+ *   - "Alice" → { target: "alice", displayName: "Alice", source: "plain-text" }
+ *   - "[[Alice]]" → { target: "alice", displayName: "Alice", source: "wikilink" }
+ *   - "[[Alice|Bobby]]" → { target: "alice", displayName: "Bobby", source: "wikilink-alias" }
+ *
+ * The target is used to resolve the note in the vault (case-insensitive).
+ * The displayName is shown in the graph (preserves user's capitalization).
+ */
+export interface ParsedLink {
+	target: string;         // Canonical note name (lowercase for comparison)
+	displayName: string;    // Display name for the graph node (preserves user's casing; may be alias)
+	baseName?: string;      // Target name with case preserved (without alias); used by extractLinkTargets
+	source: "plain-text" | "wikilink" | "wikilink-alias";
+}
 
 // Internal model
 export interface GraphNode {
@@ -158,6 +245,15 @@ export interface GraphNode {
 	bottomLeftIcon?: string;
 	bottomRightIcon?: string;
 	subtext?: string;
+	// Solid background fill color, used by organization-hierarchy rendering for
+	// synthetic "level hub" nodes (e.g. the "Officers" node representing a rank
+	// with multiple members) that have no portrait image of their own. Undefined
+	// means "use the theme's default node background" — real person-nodes never
+	// set this, so portraits are unaffected.
+	fillColor?: string;
+	// True when this node stands in for an unresolved link target rather than
+	// an actual file — see buildFullGraph's phantom-node handling in graph.ts.
+	isPhantom?: boolean;
 }
 
 export interface GraphEdge {
@@ -169,11 +265,46 @@ export interface GraphEdge {
 	pair: boolean;
 	lineStyle: LineStyle;
 	genealogy: boolean;
+	// True when this genealogy edge exists only because the parent's note
+	// declared it (a declaresChild type, e.g. `children: [[Kid]]`) with no
+	// matching declaration on the child's own note (e.g. `parents: [[Mom]]`).
+	// Such a bond is trusted only for traversal that starts at the parent —
+	// the parent's own family-tree and local/connected graph views reach the
+	// child through it, but the child's own views don't reach the parent,
+	// since the child's note makes no such claim. Undefined/false for
+	// ordinary child-declared or mutually-declared bonds, which are trusted
+	// in both directions same as always.
+	genealogyOneWay?: boolean;
 }
 
 export interface RelationsGraph {
 	nodes: GraphNode[];
 	edges: GraphEdge[];
+}
+
+/**
+ * Per-direction alias map: sourcePath → (targetPath → display alias).
+ * Used to resolve context-aware link display names at render time.
+ * Separate from the cached graph; not part of the cache signature.
+ *
+ * Example:
+ *   Alice → Bob: alias "Bobby"
+ *   Charlie → Bob: alias "Robert"
+ *   Would be represented as:
+ *   {
+ *     "Alice": { "Bob": "Bobby" },
+ *     "Charlie": { "Bob": "Robert" }
+ *   }
+ */
+export type AliasMap = Map<string, Map<string, string>>;
+
+/**
+ * Result of building a full graph, including the graph structure
+ * and a per-direction alias map for context-aware display names.
+ */
+export interface GraphBuildResult {
+	graph: RelationsGraph;
+	aliasMap: AliasMap;
 }
 
 export interface SavedPosition {
