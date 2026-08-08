@@ -621,6 +621,10 @@ function toCytoscape(
 		// against empty strings (see issue #1735) — using presence instead
 		// avoids that whole class of bug.
 		if (n.ringColor) data.ringColor = n.ringColor;
+		// Solid fill color for synthetic "level hub" nodes (organization-hierarchy
+		// rendering) that have no portrait of their own — see the node[fillColor]
+		// stylesheet rule below.
+		if (n.fillColor) data.fillColor = n.fillColor;
 		// Badge content used by the node-badges DOM overlay. Stored on the
 		// Cytoscape node data so the overlay can look up content via
 		// `node.data('topLeftIcon')` without maintaining a parallel lookup map.
@@ -714,6 +718,33 @@ function buildStyle(theme: ThemeColors, compact: boolean, showLabels: boolean): 
 				"border-width": 2,
 				"border-color": theme.bgModBorder,
 				"shape": "ellipse",
+			},
+		},
+		{
+			// Organization-hierarchy "level hub" nodes (synthetic, no portrait of
+			// their own — see fillColor on GraphNode). Ordered before the ring-
+			// color/highlight rules below so a fill color never masks the focus/
+			// selection border treatment.
+			//
+			// The level name is structural information (which rank is which), not
+			// cosmetic decoration, so it's always shown — unlike person labels it
+			// ignores the showLabels flag/`labels:` block option entirely. It's
+			// CENTERED on the node rather than below it, with no pill background
+			// (unlike every other node) so the fill color stays fully visible —
+			// instead, a dark text outline keeps white text readable across the
+			// whole palette (yellow included) regardless of the vault's theme.
+			selector: "node[fillColor]",
+			style: {
+				"background-color": "data(fillColor)",
+				"label": "data(label)",
+				"text-valign": "center",
+				"text-margin-y": 0,
+				"color": "#ffffff",
+				"text-background-opacity": 0,
+				"text-border-width": 0,
+				"text-outline-color": "#000000",
+				"text-outline-opacity": 0.55,
+				"text-outline-width": compact ? 1.5 : 2,
 			},
 		},
 		{
