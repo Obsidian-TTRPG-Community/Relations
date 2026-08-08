@@ -265,6 +265,16 @@ export interface GraphEdge {
 	pair: boolean;
 	lineStyle: LineStyle;
 	genealogy: boolean;
+	// True when this genealogy edge exists only because the parent's note
+	// declared it (a declaresChild type, e.g. `children: [[Kid]]`) with no
+	// matching declaration on the child's own note (e.g. `parents: [[Mom]]`).
+	// Such a bond is trusted only for traversal that starts at the parent —
+	// the parent's own family-tree and local/connected graph views reach the
+	// child through it, but the child's own views don't reach the parent,
+	// since the child's note makes no such claim. Undefined/false for
+	// ordinary child-declared or mutually-declared bonds, which are trusted
+	// in both directions same as always.
+	genealogyOneWay?: boolean;
 }
 
 export interface RelationsGraph {

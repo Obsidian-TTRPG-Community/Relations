@@ -380,10 +380,49 @@ export function buildFullGraph(
 
 	const placeholderImage = resolvePlaceholderImage(app, settings);
 
-	// Deduplicate edges first, filtering to valid path combinations
-	const edges = dedupeEdges(rawEdges.filter(
+	// Deduplicate edges first, filtering to valid path combinations. For a
+	// mutually-declared genealogy bond (e.g. Amalayin's `children:` AND
+	// Varinka's `parents:` both naming the same pair), dedupeEdges keeps
+	// whichever raw edge appears first — which depended on vault scan order
+	// and could flip the displayed type/color across reloads. A stable sort
+	// moves declaresChild-sourced edges (the parent's own claim) after
+	// plain child-declared ones beforehand, so the child's own declaration
+	// deterministically wins the tie regardless of scan order. Edges for
+	// different pairs are never affected by dedup either way, but this also
+	// makes family-connectors.ts's single shared tree-color pick (which
+	// reads the first genealogy edge in this array) consistently prefer the
+	// child-declared type, matching what a plain single-genealogy-type
+	// vault has always shown.
+	const dedupeOrdered = [...rawEdges.filter(
 		(e) => notePaths.has(e.source) && notePaths.has(e.target),
-	));
+	)].sort((a, b) => {
+		if (!a.genealogy || !b.genealogy) return 0;
+		const aDeclaresChild = typeMap.get(a.type.toLowerCase())?.declaresChild ?? false;
+		const bDeclaresChild = typeMap.get(b.type.toLowerCase())?.declaresChild ?? false;
+		return Number(aDeclaresChild) - Number(bDeclaresChild);
+	});
+	const edges = dedupeEdges(dedupeOrdered);
+
+	// A genealogy edge produced solely by a declaresChild type (the parent's
+	// note naming the child, e.g. `children: [[Kid]]`) is only as trustworthy
+	// as the parent's own claim unless the child's note names them back (via
+	// any non-declaresChild genealogy type, e.g. `parents: [[Mom]]`). Mark the
+	// unconfirmed ones so downstream neighborhood walks (family-tree,
+	// local/connected graph) let the parent's view reach the child through
+	// them without also letting the child's view reach the parent — see
+	// localSubgraph, connectedComponent, and filterFamilyNeighborhood below.
+	const childConfirmedPairs = new Set<string>();
+	for (const e of rawEdges) {
+		if (!e.genealogy) continue;
+		const type = typeMap.get(e.type.toLowerCase());
+		if (type?.declaresChild) continue;
+		childConfirmedPairs.add(`${e.source}|${e.target}`);
+	}
+	for (const e of edges) {
+		if (e.genealogy && !childConfirmedPairs.has(`${e.source}|${e.target}`)) {
+			e.genealogyOneWay = true;
+		}
+	}
 
 	const nodes: GraphNode[] = [];
 	for (const path of notePaths) {
@@ -479,12 +518,14 @@ export function localSubgraph(
 		return { nodes: [], edges: [] };
 	}
 
-	// adjacency map (undirected for traversal purposes — we want hops regardless of edge direction)
+	// adjacency map (undirected for traversal purposes — we want hops regardless of edge
+	// direction). Exception: a genealogyOneWay edge only lets the parent (target) reach
+	// the child (source), not the reverse — see the GraphEdge.genealogyOneWay doc.
 	const adj = new Map<string, Set<string>>();
 	for (const e of full.edges) {
 		if (!adj.has(e.source)) adj.set(e.source, new Set());
 		if (!adj.has(e.target)) adj.set(e.target, new Set());
-		adj.get(e.source)!.add(e.target);
+		if (!e.genealogyOneWay) adj.get(e.source)!.add(e.target);
 		adj.get(e.target)!.add(e.source);
 	}
 
@@ -533,11 +574,13 @@ export function connectedComponent(
 	if (!graph.nodes.some((n) => n.id === centerPath)) {
 		return { nodes: [], edges: [] };
 	}
+	// See localSubgraph — a genealogyOneWay edge only lets the parent (target)
+	// reach the child (source), not the reverse.
 	const adj = new Map<string, Set<string>>();
 	for (const e of graph.edges) {
 		if (!adj.has(e.source)) adj.set(e.source, new Set());
 		if (!adj.has(e.target)) adj.set(e.target, new Set());
-		adj.get(e.source)!.add(e.target);
+		if (!e.genealogyOneWay) adj.get(e.source)!.add(e.target);
 		adj.get(e.target)!.add(e.source);
 	}
 	const visited = new Set<string>([centerPath]);
@@ -671,10 +714,17 @@ export function filterFamilyNeighborhood(
 
 	for (const e of full.edges) {
 		if (e.genealogy) {
-			if (!parentsOf.has(e.source)) parentsOf.set(e.source, new Set());
+			// childrenOf is always populated — the parent's own descendant walk
+			// trusts their own declaration regardless of what the child's note
+			// says. parentsOf (the child's ancestor walk) only gets a
+			// genealogyOneWay edge's target when the child's own note confirms
+			// it; see the GraphEdge.genealogyOneWay doc.
 			if (!childrenOf.has(e.target)) childrenOf.set(e.target, new Set());
-			parentsOf.get(e.source)!.add(e.target);
 			childrenOf.get(e.target)!.add(e.source);
+			if (!e.genealogyOneWay) {
+				if (!parentsOf.has(e.source)) parentsOf.set(e.source, new Set());
+				parentsOf.get(e.source)!.add(e.target);
+			}
 		}
 		if (e.pair) {
 			if (!partnersOf.has(e.source)) partnersOf.set(e.source, new Set());

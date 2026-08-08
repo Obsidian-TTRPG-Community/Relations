@@ -592,7 +592,7 @@ export class RelationsSettingTab extends PluginSettingTab {
 			makeCheckbox("pair",      "Pair — pull these nodes very close (e.g. spouse)");
 			makeCheckbox("treeLayout","Tree — lay out top-down when this type dominates");
 			makeCheckbox("genealogy", "Genealogy — bloodline edge for family-graph mode");
-			makeCheckbox("declaresChild", "Child — this property is written on the PARENT's note and names the child (e.g. `children:`). Only used when Gen is on; edges are stored child→parent either way, so both sides of a bond can be declared without duplicates.");
+			makeCheckbox("declaresChild", "Child — this property is written on the PARENT's note and names the child (e.g. `children:`). Only used when Gen is on; edges are stored child→parent either way, so both sides of a bond can be declared without duplicates. Unless the child's own note also names the parent back (via any non-Child genealogy property, e.g. `parents:`), the bond is one-way: it shows up in the parent's family-tree and local/connected graph views, but not the child's.");
 
 			// Line style dropdown
 			const lineSelect = row.createEl("select", { cls: "relations-types-linestyle" });
