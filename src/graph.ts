@@ -6,6 +6,7 @@ import {
 	RelationsSettings,
 	RelationshipType,
 	DisplayNameMap,
+	StatusRule,
 } from "./types";
 import { GraphCache } from "./graph-cache";
 
@@ -148,6 +149,208 @@ function filterBeforeWalk(
 		g = filterGraphByGroups(g, groups, centerPath, settings.relationshipTypes);
 	}
 	return g;
+}
+
+/**
+ * Distinct frontmatter property names referenced across a set of Node status
+ * rules. This is what `buildNode` needs to know to populate `filterValues` —
+ * and, symmetrically, the only part of `statusRules` that belongs in the
+ * graph-cache signature (see graph-cache.ts): it determines what gets
+ * snapshotted per node. Each rule's value/hide/mute/color is read live on
+ * every render instead, so editing those needs no cache bust or rescan.
+ */
+export function distinctStatusProperties(rules: StatusRule[]): string[] {
+	const set = new Set<string>();
+	for (const r of rules) {
+		const p = r.property?.trim();
+		if (p) set.add(p);
+	}
+	return [...set];
+}
+
+/**
+ * Extract every element of a frontmatter property's value as trimmed strings,
+ * for Node status Hide/Mute matching. Unlike resolveFrontmatterString/
+ * resolveRingColor (which take only the first element of a list-valued
+ * property — correct for a single ring color or badge), Hide/Mute must catch
+ * a match on ANY element: `char_condition: [Charmed, Poisoned]` should match a
+ * rule on "Charmed" regardless of list order. Non-string scalars are
+ * stringified for consistency with the other resolvers. Empty/blank elements
+ * are dropped.
+ */
+export function nodePropertyValues(
+	frontmatter: Record<string, unknown> | undefined,
+	propertyName: string,
+): string[] {
+	const prop = propertyName?.trim();
+	if (!prop || !frontmatter) return [];
+	const raw: unknown = frontmatter[prop];
+	if (raw == null) return [];
+	const items: unknown[] = Array.isArray(raw) ? raw : [raw];
+	const out: string[] = [];
+	for (const item of items) {
+		if (item == null) continue;
+		const v = String(item).trim();
+		if (v) out.push(v);
+	}
+	return out;
+}
+
+/**
+ * Group a set of Node status rules' values by property, keeping only rules
+ * where `flag` (hide or mute) is set. Used by filterGraphByNodeProperties to
+ * build a per-property Set of "any of these values matches" for a quick
+ * membership check across possibly-multiple rules sharing a property.
+ */
+function groupRuleValues(
+	rules: StatusRule[],
+	flag: "hide" | "mute",
+): Map<string, Set<string>> {
+	const byProperty = new Map<string, Set<string>>();
+	for (const r of rules) {
+		if (!r[flag]) continue;
+		const prop = r.property?.trim();
+		const val = r.value?.trim();
+		if (!prop || !val) continue;
+		if (!byProperty.has(prop)) byProperty.set(prop, new Set());
+		byProperty.get(prop)!.add(val);
+	}
+	return byProperty;
+}
+
+/**
+ * Node status "Hide": remove nodes matching any Hide rule (OR across rules —
+ * a node hidden by any one rule is hidden), then their edges, then any other
+ * node left with no remaining edges (mirrors filterGraphByTypes' pruning).
+ * `keepNodeId` is always retained even if hidden or isolated, so the active/
+ * center note never disappears from its own view.
+ *
+ * Matching reads each node's precomputed `filterValues` snapshot (see
+ * GraphNode.filterValues) rather than re-deriving from frontmatter — a rule
+ * matches if ANY element of the node's value list for that property equals
+ * the rule's value.
+ *
+ * Callers are responsible for skipping this entirely in family-tree/family-
+ * graph views — genealogy always shows full lineage, dead ancestors included.
+ * See codeblock.ts for where that exemption is applied.
+ *
+ * Note on issue #28 (github.com/Obsidian-TTRPG-Community/Relations/issues/28):
+ * buildLocalGraph/localSubgraph/buildConnectedGraph compute hop-distance
+ * membership on the UNFILTERED full graph, before any post-hoc edge/node
+ * filter (type filter, and now this one) runs. A node reachable only through
+ * an edge this function removes can therefore still render, stranded, with
+ * no path back to the center within the original hop window — the same root
+ * cause #28 describes for the type filter. This function does NOT attempt to
+ * work around that (it would require passing hop-context in here that this
+ * pure function doesn't have); it's expected to become moot once #28 is
+ * fixed upstream, the same way it will for the type filter.
+ *
+ * What this function DOES guard against, independent of #28: a node left
+ * with literally zero edges once its only neighbor is hidden — mirroring
+ * filterGraphByTypes' own pruning, so Hide doesn't strand a note with no
+ * relationships at all floating in the graph.
+ */
+export function filterGraphByNodeProperties(
+	graph: RelationsGraph,
+	rules: StatusRule[],
+	keepNodeId?: string,
+): RelationsGraph {
+	const hideValues = groupRuleValues(rules, "hide");
+	if (hideValues.size === 0) return graph;
+
+	const isHidden = (n: GraphNode): boolean => {
+		if (n.id === keepNodeId) return false;
+		for (const [prop, values] of hideValues) {
+			const nodeValues = n.filterValues?.[prop];
+			if (!nodeValues) continue;
+			if (nodeValues.some((v) => values.has(v))) return true;
+		}
+		return false;
+	};
+
+	const survivors = graph.nodes.filter((n) => !isHidden(n));
+	const survivorIds = new Set(survivors.map((n) => n.id));
+	const edges = graph.edges.filter((e) => survivorIds.has(e.source) && survivorIds.has(e.target));
+
+	// Second pass, mirroring filterGraphByTypes exactly: any node left with no
+	// remaining edges is pruned too, unless it's the active/center note. This
+	// catches a survivor whose only edge(s) went to a hidden node — without
+	// it, that survivor would render as a dangling isolated node.
+	const connected = new Set<string>();
+	for (const e of edges) {
+		connected.add(e.source);
+		connected.add(e.target);
+	}
+	const nodes = survivors.filter((n) => connected.has(n.id) || n.id === keepNodeId);
+	const kept = new Set(nodes.map((n) => n.id));
+	const finalEdges = edges.filter((e) => kept.has(e.source) && kept.has(e.target));
+	return withDisplayNames(graph, { nodes, edges: finalEdges });
+}
+
+/**
+ * Node status "Mute": flag nodes matching any Mute rule with `muted: true`
+ * and the winning rule's `mutedColor`, without ever removing them or their
+ * edges. First matching rule wins when multiple rules match the same node
+ * (same precedent as resolveRingColor). Returns a new graph — the input is
+ * left untouched, so it's safe to apply on top of a cached graph.
+ *
+ * Applied everywhere, including family-tree/family-graph views — unlike Hide,
+ * muting never removes a node so it can never fragment a lineage.
+ */
+export function applyMutedNodes(
+	graph: RelationsGraph,
+	rules: StatusRule[],
+): RelationsGraph {
+	const muteRules = rules.filter((r) => r.mute && r.property?.trim() && r.value?.trim());
+	if (muteRules.length === 0) return graph;
+
+	const nodes = graph.nodes.map((n) => {
+		for (const r of muteRules) {
+			const prop = r.property.trim();
+			const val = r.value.trim();
+			const nodeValues = n.filterValues?.[prop];
+			if (nodeValues && nodeValues.includes(val)) {
+				return { ...n, muted: true, mutedColor: r.muteColor };
+			}
+		}
+		return n;
+	});
+	return withDisplayNames(graph, { nodes, edges: graph.edges });
+}
+
+/**
+ * Legend entries for currently-muted nodes. A mute color only shows up here
+ * when a muted node bearing that exact color is actually present in `graph`
+ * right now — not just because a mute rule with that color exists in
+ * settings. Prevents an always-on "Dead" swatch cluttering every graph in a
+ * vault where nobody happens to be dead in THIS view.
+ *
+ * Dedupes by color (first-appearance rule order): if two rules share a mute
+ * color, that's a deliberate "these both mean the same visual thing" choice,
+ * so one swatch is correct, not two. Label is the rule's value (falls back to
+ * its property name, then "Muted", if value is blank).
+ */
+export function mutedLegendEntries(
+	graph: RelationsGraph,
+	rules: StatusRule[],
+): { label: string; color: string }[] {
+	const usedColors = new Set<string>();
+	for (const n of graph.nodes) {
+		if (n.muted && n.mutedColor) usedColors.add(n.mutedColor);
+	}
+	if (usedColors.size === 0) return [];
+
+	const seenColors = new Set<string>();
+	const entries: { label: string; color: string }[] = [];
+	for (const r of rules) {
+		if (!r.mute || !r.muteColor) continue;
+		if (!usedColors.has(r.muteColor)) continue;
+		if (seenColors.has(r.muteColor)) continue;
+		seenColors.add(r.muteColor);
+		const label = r.value?.trim() || r.property?.trim() || "Muted";
+		entries.push({ label, color: r.muteColor });
+	}
+	return entries;
 }
 
 /**
@@ -668,6 +871,16 @@ function buildNode(
 	if (bottomLeftIcon) node.bottomLeftIcon = bottomLeftIcon;
 	if (bottomRightIcon) node.bottomRightIcon = bottomRightIcon;
 	if (subtext) node.subtext = subtext;
+
+	const statusProps = distinctStatusProperties(settings.statusRules);
+	if (statusProps.length > 0) {
+		const filterValues: Record<string, string[]> = {};
+		for (const prop of statusProps) {
+			const values = nodePropertyValues(fm, prop);
+			if (values.length > 0) filterValues[prop] = values;
+		}
+		if (Object.keys(filterValues).length > 0) node.filterValues = filterValues;
+	}
 	return node;
 }
 

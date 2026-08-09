@@ -1,4 +1,5 @@
 import { RelationsGraph, RelationsSettings } from "./types";
+import { distinctStatusProperties } from "./graph";
 
 /**
  * Caches the result of buildFullGraph between calls so that:
@@ -91,5 +92,10 @@ function hashSettings(s: RelationsSettings): string {
 		subtext: s.subtextProperty,
 		// Missing-note nodes are created (or not) during the scan.
 		missing: s.showMissingNotes,
+		// Node status: only the distinct property NAMES referenced across all
+		// rules affect what gets snapshotted into each node's filterValues (see
+		// buildNode in graph.ts). Each rule's value/hide/mute/muteColor is read
+		// live on every render instead — editing those needs no rebuild.
+		statusProps: distinctStatusProperties(s.statusRules),
 	});
 }

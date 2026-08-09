@@ -338,6 +338,58 @@ export class RelationsSettingTab extends PluginSettingTab {
 					this.plugin.refreshGraphView();
 				}));
 
+		// -----------------------------------------------------------------
+		// Node Status section: a flat rule table — Property / Value / Hide /
+		// Mute / Color — letting users mark notes Hidden and/or Muted based on
+		// any frontmatter property. Applies live, everywhere, the instant a rule
+		// is saved: no per-graph/per-embed setup. Family-tree/family-graph views
+		// are structurally exempt from Hide (a dead ancestor must still show in
+		// a genealogy chart); Mute applies everywhere.
+		// -----------------------------------------------------------------
+		new Setting(containerEl).setName("Node status").setHeading();
+		const statusHelp = containerEl.createDiv({ cls: "setting-item-description" });
+		statusHelp.createEl("p", {
+			text: "Mark notes Hidden and/or Muted based on any frontmatter property — e.g. removing or fading dead characters from the graph. Each row is one rule: a frontmatter property, a value to match, and what to do when it matches.",
+		});
+		{
+			const p = statusHelp.createEl("p");
+			p.appendText("Example: property ");
+			p.createEl("code", { text: "char_status" });
+			p.appendText(", value ");
+			p.createEl("code", { text: "Dead" });
+			p.appendText(", Hide + Mute both checked. A note with ");
+			p.createEl("code", { text: "char_status: Dead" });
+			p.appendText(" disappears from Full and Active-note graphs, but still appears faded (in the chosen color) in any family-tree/family-graph view, so a genealogy chart never loses a deceased ancestor.");
+		}
+		{
+			const p = statusHelp.createEl("p");
+			p.createEl("strong", { text: "Hide" });
+			p.appendText(" removes matching notes (and their edges) from the graph, except in family-tree/family-graph views. ");
+			p.createEl("strong", { text: "Mute" });
+			p.appendText(" fades matching notes without ever removing them, everywhere including family views.");
+		}
+
+		const statusList = containerEl.createDiv();
+		this.renderStatusRuleList(statusList);
+
+		new Setting(containerEl)
+			.addButton((b: ButtonComponent) => b
+				.setButtonText("Add status rule")
+				.setCta()
+				.onClick(async () => {
+					this.plugin.settings.statusRules.push({
+						property: "",
+						value: "",
+						hide: false,
+						mute: false,
+						muteColor: "#6b7280",
+					});
+					await this.plugin.saveSettings();
+					this.plugin.graphCache.invalidate();
+					this.redisplay();
+					this.plugin.refreshGraphView();
+				}));
+
 		new Setting(containerEl).setName("Code block syntax").setHeading();
 		const usage = containerEl.createEl("pre", { cls: "relations-help-pre" });
 		usage.setText(
@@ -518,6 +570,109 @@ export class RelationsSettingTab extends PluginSettingTab {
 			removeBtn.addEventListener("click", () => {
 				void (async () => {
 					this.plugin.settings.ringColorRules.splice(idx, 1);
+					await this.plugin.saveSettings();
+					this.plugin.graphCache.invalidate();
+					this.redisplay();
+					this.plugin.refreshGraphView();
+				})();
+			});
+		});
+	}
+
+	/**
+	 * Render the Node status rules as a table of (property, value, hide, mute,
+	 * color, remove) rows. Uses its own grid class rather than reusing
+	 * `.relations-types-row` — that table has 9 fixed-width tracks built for
+	 * the relationship-types table, and reusing it here squeezed the property
+	 * name input into a tiny leftover fraction of space while leaving unused
+	 * grid tracks trailing off to the right.
+	 *
+	 * Only the Property cell busts the graph cache: it's the sole part of a
+	 * rule that affects what gets snapshotted into each node's filterValues
+	 * (see distinctStatusProperties in graph.ts). Value/Hide/Mute/Color are all
+	 * read live on every render, so editing them just re-renders open graphs.
+	 */
+	private renderStatusRuleList(container: HTMLElement): void {
+		container.empty();
+
+		if (this.plugin.settings.statusRules.length === 0) {
+			const empty = container.createDiv({ cls: "setting-item-description" });
+			empty.setText("No rules yet. Click \"Add status rule\" below to create one.");
+			return;
+		}
+
+		const header = container.createDiv({ cls: "relations-status-rule-header" });
+		header.createSpan({ text: "Property", cls: "relations-status-rule-col" });
+		header.createSpan({ text: "Value", cls: "relations-status-rule-col" });
+		header.createSpan({ text: "Hide", cls: "relations-status-rule-col" });
+		header.createSpan({ text: "Mute", cls: "relations-status-rule-col" });
+		header.createSpan({ text: "Color", cls: "relations-status-rule-col" });
+		header.createSpan({ text: "", cls: "relations-status-rule-col" });
+
+		this.plugin.settings.statusRules.forEach((rule, idx) => {
+			const row = container.createDiv({ cls: "relations-status-rule-row" });
+
+			const propertyInput = row.createEl("input", { type: "text", cls: "relations-status-rule-input" });
+			propertyInput.value = rule.property;
+			propertyInput.placeholder = "e.g. char_status";
+			propertyInput.addEventListener("change", () => {
+				void (async () => {
+					this.plugin.settings.statusRules[idx].property = propertyInput.value.trim();
+					await this.plugin.saveSettings();
+					this.plugin.graphCache.invalidate();
+					this.plugin.refreshGraphView();
+				})();
+			});
+
+			const valueInput = row.createEl("input", { type: "text", cls: "relations-status-rule-input" });
+			valueInput.value = rule.value;
+			valueInput.placeholder = "e.g. Dead";
+			valueInput.addEventListener("change", () => {
+				void (async () => {
+					this.plugin.settings.statusRules[idx].value = valueInput.value;
+					await this.plugin.saveSettings();
+					this.plugin.refreshGraphView();
+				})();
+			});
+
+			const hideCb = row.createEl("input", { type: "checkbox", cls: "relations-status-rule-cb" });
+			hideCb.checked = rule.hide;
+			hideCb.title = "Hide — remove matching notes and their edges (except in family-tree/family-graph views)";
+			hideCb.addEventListener("change", () => {
+				void (async () => {
+					this.plugin.settings.statusRules[idx].hide = hideCb.checked;
+					await this.plugin.saveSettings();
+					this.plugin.refreshGraphView();
+				})();
+			});
+
+			const muteCb = row.createEl("input", { type: "checkbox", cls: "relations-status-rule-cb" });
+			muteCb.checked = rule.mute;
+			muteCb.title = "Mute — fade matching notes without ever removing them";
+			muteCb.addEventListener("change", () => {
+				void (async () => {
+					this.plugin.settings.statusRules[idx].mute = muteCb.checked;
+					await this.plugin.saveSettings();
+					this.plugin.refreshGraphView();
+				})();
+			});
+
+			const colorInput = row.createEl("input", { type: "color", cls: "relations-types-color" });
+			colorInput.value = rule.muteColor;
+			colorInput.title = "Mute color — tinted wash under the portrait when this rule mutes a node";
+			colorInput.addEventListener("change", () => {
+				void (async () => {
+					this.plugin.settings.statusRules[idx].muteColor = colorInput.value;
+					await this.plugin.saveSettings();
+					this.plugin.refreshGraphView();
+				})();
+			});
+
+			const removeBtn = row.createEl("button", { text: "✕", cls: "relations-types-remove" });
+			removeBtn.title = "Remove rule";
+			removeBtn.addEventListener("click", () => {
+				void (async () => {
+					this.plugin.settings.statusRules.splice(idx, 1);
 					await this.plugin.saveSettings();
 					this.plugin.graphCache.invalidate();
 					this.redisplay();

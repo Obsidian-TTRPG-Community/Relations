@@ -131,6 +131,20 @@
 	color: var(--text-normal);
 }
 
+/* Node status mute-color row. flex-basis: 100% forces it onto its own line
+   below the connector-type legend, even when there's horizontal room left on
+   the last connector-type row — those are a different kind of legend entry
+   (node fill/tint vs. edge style) and shouldn't visually run together. */
+.relations-legend-status {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px;
+	flex-basis: 100%;
+	padding-top: 6px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
 /* ---------------------------------------------------------------------------
    Type filter panel — used by the side-panel view and code-block embeds.
    --------------------------------------------------------------------------- */
@@ -306,6 +320,15 @@
 	border-radius: 0;
 }
 
+/* Node status mute-color swatch: a filled dot, not a line — mute tints a
+   node's fill, it isn't an edge style, so it needs its own shape in the legend. */
+.relations-legend-swatch.is-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background-color: var(--swatch-color, #6b7280);
+}
+
 /* === embedded code blocks ===
    IMPORTANT: explicit width AND height — Cytoscape needs concrete dimensions when it
    mounts. Using `display: flex` with column direction ensures the canvas takes most
@@ -465,6 +488,43 @@
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 4px;
 }
+
+/* === Node status rule table === */
+/* Dedicated grid, not .relations-types-row: that table reserves 9 fixed-width
+   tracks for the relationship-types table, and reusing it here squeezed the
+   property name input into a tiny leftover fraction of space. */
+.relations-status-rule-header,
+.relations-status-rule-row {
+	display: grid;
+	grid-template-columns: 1fr 1fr 44px 44px 60px 32px;
+	gap: 8px;
+	align-items: center;
+	padding: 4px 0;
+}
+
+.relations-status-rule-header {
+	font-size: 11px;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding-bottom: 6px;
+	margin-bottom: 4px;
+	text-align: center;
+}
+
+.relations-status-rule-header .relations-status-rule-col:first-child,
+.relations-status-rule-header .relations-status-rule-col:nth-child(2) {
+	text-align: left;
+}
+
+.relations-status-rule-input {
+	width: 100%;
+	padding: 4px 8px;
+	font-size: 13px;
+}
+
+.relations-status-rule-cb { justify-self: center; }
 
 .relations-types-remove {
 	background: transparent;

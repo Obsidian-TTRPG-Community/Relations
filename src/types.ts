@@ -39,6 +39,28 @@ export interface RingColorRule {
 	color: string;   // hex color string, e.g. "#ef4444"
 }
 
+/**
+ * One rule in the Node status table: when a node's frontmatter value of
+ * `property` equals `value` (string-compared, trimmed, case-sensitive; any
+ * element of a list-valued property counts as a match), the node can be
+ * Hidden (removed from the graph, edges and all) and/or Muted (faded, tinted
+ * with `muteColor`, but never removed). A rule with both flags false is an
+ * inert no-op row — kept rather than auto-deleted so unchecking both boxes
+ * doesn't silently lose the row's property/value the user typed.
+ *
+ * Unlike RingColorRule, this table is keyed by property name PER ROW (not one
+ * shared property for the whole feature), so different rules can independently
+ * target different frontmatter properties (e.g. char_status and char_condition).
+ */
+export interface StatusRule {
+	property: string;  // frontmatter property name this rule matches against
+	value: string;      // exact-match value (case-sensitive, trimmed)
+	hide: boolean;       // remove matching nodes (and their edges) from the graph
+	mute: boolean;        // fade matching nodes without removing them
+	muteColor: string;     // hex color tinted under the portrait when muted; required
+	                        // because <input type="color"> can't represent "unset"
+}
+
 export interface RelationsSettings {
 	relationshipTypes: RelationshipType[];
 
@@ -101,6 +123,14 @@ export interface RelationsSettings {
 	bottomLeftIconProperty: string;
 	bottomRightIconProperty: string;
 	subtextProperty: string;
+
+	// Node status: a flat rule table (see StatusRule) letting users mark notes
+	// Hidden and/or Muted based on any frontmatter property, e.g. removing/fading
+	// dead characters (`char_status: Dead`) from the graph. Configured entirely
+	// on the settings page — applies live, everywhere, the instant it's saved.
+	// Family-tree/family-graph views are structurally exempt from Hide (a dead
+	// ancestor must still show in a genealogy chart); Mute applies everywhere.
+	statusRules: StatusRule[];
 }
 
 export const DEFAULT_SETTINGS: RelationsSettings = {
@@ -144,6 +174,7 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 	bottomLeftIconProperty: "",
 	bottomRightIconProperty: "",
 	subtextProperty: "",
+	statusRules: [],
 };
 
 // Internal model
@@ -177,6 +208,19 @@ export interface GraphNode {
 	missing?: boolean;
 	linkText?: string;
 	linkSource?: string;
+	// Precomputed snapshot of this node's frontmatter values for every property
+	// referenced across settings.statusRules, ALL list elements kept (not just
+	// the first, unlike ringColor/badges) so a Hide/Mute rule can match any
+	// element of a list-valued property. Populated at buildNode time so Hide/Mute
+	// matching doesn't need repeated frontmatter lookups; the rules themselves
+	// (value/hide/mute/color) are read live on every render, not baked in here.
+	filterValues?: Record<string, string[]>;
+	// Whether a Mute rule currently matches this node. Computed fresh on every
+	// render (via applyMutedNodes), NOT baked in at build time, so toggling a
+	// rule's mute checkbox needs no graph-cache invalidation or vault rescan.
+	muted?: boolean;
+	// The winning Mute rule's color (first match wins), when muted is true.
+	mutedColor?: string;
 }
 
 export interface GraphEdge {

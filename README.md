@@ -484,6 +484,23 @@ Useful if your vault has lots of incidental wikilinks you don't want polluting t
 
 </details>
 
+## Node status
+
+Mark notes **Hidden** and/or **Muted** based on any frontmatter property — for things like decluttering a graveyard of dead characters out of the way, or fading retired/MIA notes without losing them.
+
+In **Settings → Relations → Node status**, each row is one rule: a frontmatter **property**, a **value** to match, and what to do when it matches — **Hide**, **Mute**, or both. Multiple rules can share a property or target different properties independently, and rules apply live, everywhere, the instant they're saved — no per-graph or per-embed setup.
+
+- **Hide** removes matching notes, and their edges, from the graph entirely. Skipped in **family-tree**/**family-graph** views — genealogy always shows full lineage, dead ancestors included.
+- **Mute** fades matching notes (reduced opacity, plus an optional colored wash under the portrait) without ever removing them. Applies everywhere, including family views, since it never breaks a connection.
+- A rule with neither box checked is an inert no-op row — kept rather than auto-deleted, so unchecking both doesn't lose what you typed.
+- Matching checks every element of a list-valued property, not just the first — a rule on `Poisoned` still catches `char_condition: [Charmed, Poisoned]`.
+
+```yaml
+char_status: Dead
+```
+
+With property `char_status`, value `Dead`, Hide and Mute both checked, and a grey mute color: the character disappears from Full and Active-note graphs, but still appears faded grey in any family-tree/family-graph view, so a genealogy chart never loses a deceased ancestor. Add another rule (e.g. `char_status` / `Undead` / green) to distinguish different statuses at a glance.
+
 ## Building from source
 
 ```bash
