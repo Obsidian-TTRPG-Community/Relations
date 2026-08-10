@@ -65,4 +65,38 @@ describe("synthesizeInformalPartnerships", () => {
 		]));
 		expect(out).toHaveLength(0);
 	});
+
+	describe("treatAnyEdgeAsDeclared", () => {
+		function ally(a: string, b: string): GraphEdge {
+			return { source: a, target: b, type: "ally", color: "#0f0", symmetric: true, pair: false, lineStyle: "solid", genealogy: false };
+		}
+
+		it("without the flag, still synthesizes despite a non-pair edge between co-parents (unchanged default behavior)", () => {
+			const out = synthesizeInformalPartnerships(graphOf([
+				gen("Kid", "Anna"), gen("Kid", "Bram"), ally("Anna", "Bram"),
+			]));
+			expect(out).toHaveLength(1);
+		});
+
+		it("with the flag set, a non-pair edge between co-parents suppresses synthesis", () => {
+			const out = synthesizeInformalPartnerships(graphOf([
+				gen("Kid", "Anna"), gen("Kid", "Bram"), ally("Anna", "Bram"),
+			]), true);
+			expect(out).toHaveLength(0);
+		});
+
+		it("with the flag set, still synthesizes when co-parents have no edge at all", () => {
+			const out = synthesizeInformalPartnerships(graphOf([
+				gen("Kid", "Anna"), gen("Kid", "Bram"),
+			]), true);
+			expect(out).toHaveLength(1);
+		});
+
+		it("with the flag set, a declared pair edge still suppresses synthesis (unchanged)", () => {
+			const out = synthesizeInformalPartnerships(graphOf([
+				gen("Kid", "Anna"), gen("Kid", "Bram"), pair("Anna", "Bram"),
+			]), true);
+			expect(out).toHaveLength(0);
+		});
+	});
 });

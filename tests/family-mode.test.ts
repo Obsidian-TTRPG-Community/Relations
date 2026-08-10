@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveFamilyMode } from "../src/codeblock";
+import { resolveFamilyMode, resolveKeepRelationships } from "../src/codeblock";
 
 describe("resolveFamilyMode", () => {
 	it("maps family-tree to the true-tree (orthogonal) view", () => {
@@ -24,5 +24,21 @@ describe("resolveFamilyMode", () => {
 	it("ignores non-true values (only an explicit boolean true enables a mode)", () => {
 		expect(resolveFamilyMode({ "family-tree": "yes" })).toBeUndefined();
 		expect(resolveFamilyMode({ "family-graph": 1 })).toBeUndefined();
+	});
+});
+
+describe("resolveKeepRelationships", () => {
+	it("accepts kebab-case and camelCase keys", () => {
+		expect(resolveKeepRelationships({ "keep-relationships": true })).toBe(true);
+		expect(resolveKeepRelationships({ keepRelationships: true })).toBe(true);
+	});
+
+	it("defaults to false when unset", () => {
+		expect(resolveKeepRelationships({})).toBe(false);
+	});
+
+	it("ignores non-true values", () => {
+		expect(resolveKeepRelationships({ "keep-relationships": "yes" })).toBe(false);
+		expect(resolveKeepRelationships({ keepRelationships: 1 })).toBe(false);
 	});
 });

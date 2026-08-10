@@ -69,6 +69,7 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 					"# scope: local        # local | connected | full\n" +
 					"# tree: false         # generic top-down dagre layout\n" +
 					"# family-graph: false # focused family view: parents above, partners level, children below\n" +
+					"# keep-relationships: false # with a family view, keep every relationship type visible too\n" +
 					"# zoom: 1.0           # zoom multiplier; mini defaults to 1.4\n" +
 					"# height: 400px       # override embed height. px, em, rem, vh, vw, %\n" +
 					"# spacing: 1.0        # node spacing; <1 tighter, >1 looser\n" +

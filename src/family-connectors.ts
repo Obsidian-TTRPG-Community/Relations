@@ -1,5 +1,5 @@
 import cytoscape, { Core } from "cytoscape";
-import { RelationsGraph } from "./types";
+import { RelationsGraph, LineStyle } from "./types";
 import { computeEffectiveParents } from "./family-parenting";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -7,6 +7,44 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 interface FamilyGroup {
 	parents: string[];
 	children: string[];
+}
+
+interface ConnectorStyle {
+	color: string;
+	lineStyle: LineStyle;
+}
+
+/**
+ * Resolve the color/lineStyle a child's connector stem should use, from one of its raw
+ * genealogy edges to any parent in the given set. Expects the ORIGINAL graph (child→
+ * parent: e.source=child, e.target=parent) — same pre-inversion convention as
+ * buildFamilyGroups. Returns undefined if no matching genealogy edge is found (e.g. a
+ * child/parent-set mismatch), in which case callers fall back to a default style.
+ *
+ * A child with two parents is expected to share one relationship type across both legs
+ * (e.g. both "parent", or both a custom "adopted" type) — this picks whichever leg is
+ * found first, which is correct for that common case.
+ */
+export function resolveConnectorStyle(
+	graph: RelationsGraph,
+	child: string,
+	parents: string[],
+): ConnectorStyle | undefined {
+	const parentSet = new Set(parents);
+	const edge = graph.edges.find((e) => e.genealogy && e.source === child && parentSet.has(e.target));
+	return edge ? { color: edge.color, lineStyle: edge.lineStyle } : undefined;
+}
+
+/** SVG stroke-dasharray for each LineStyle, matching the Cytoscape dash values in
+ *  render.ts's buildStyle (ls-dashed: [8,4], ls-dotted: [2,4]). "double" has no raw-SVG
+ *  equivalent to Cytoscape's outline trick — rendered as a plain solid line here, a
+ *  documented v1 limitation. */
+function dashArrayFor(lineStyle: LineStyle): string | undefined {
+	switch (lineStyle) {
+		case "dashed": return "8,4";
+		case "dotted": return "2,4";
+		default: return undefined;
+	}
 }
 
 /**
@@ -49,15 +87,17 @@ export function drawFamilyConnectors(
 	const groups = buildFamilyGroups(graph);
 	const pairAdj = buildPairAdjacency(graph);
 	const g = createOverlay(container);
-	// All connectors share one color — per-genealogy-type differentiation not yet supported.
-	const stroke = graph.edges.find((e) => e.genealogy)?.color || "#888888";
+	// Fallback color when a group's genealogy edge can't be resolved (shouldn't normally
+	// trigger — see resolveConnectorStyle). Per-child/per-trunk color and lineStyle are
+	// otherwise resolved from each group's actual genealogy edges.
+	const fallbackColor = graph.edges.find((e) => e.genealogy)?.color || "#888888";
 	const width = compact ? 1.5 : 2.5;
 	const fontSize = compact ? 9 : 11;
 
 	function redraw(): void {
 		while (g.firstChild) g.removeChild(g.firstChild);
 		for (const [, group] of groups) {
-			drawGroup(g, cy, group, stroke, width, fontSize, labelHooks);
+			drawGroup(g, cy, graph, group, fallbackColor, width, fontSize, labelHooks);
 		}
 	}
 
@@ -133,8 +173,9 @@ function createOverlay(container: HTMLElement): SVGGElement {
 function drawGroup(
 	g: SVGGElement,
 	cy: Core,
+	graph: RelationsGraph,
 	group: FamilyGroup,
-	stroke: string,
+	fallbackColor: string,
 	strokeWidth: number,
 	fontSize: number,
 	labelHooks: OverlayLabelHooks | null,
@@ -169,7 +210,17 @@ function drawGroup(
 			? (parentPos[0].y + parentPos[1].y) / 2
 			: gapTop;
 
-	addPath(g, `M${midX},${dropStartY} V${dropY}`, stroke, strokeWidth);
+	const styleFor = (childId: string): ConnectorStyle =>
+		resolveConnectorStyle(graph, childId, group.parents) ?? { color: fallbackColor, lineStyle: "solid" };
+
+	// The shared trunk (drop + horizontal bar) has no single "correct" owner when
+	// children under one parent-set have different genealogy types — use the first
+	// child in sort order (deterministic; correct whenever the whole group shares
+	// one type, the common case). Known approximation, not a per-leg split.
+	const sortedChildIds = [...group.children].sort();
+	const trunkStyle = styleFor(sortedChildIds[0]);
+
+	addPath(g, `M${midX},${dropStartY} V${dropY}`, trunkStyle.color, strokeWidth, dashArrayFor(trunkStyle.lineStyle));
 
 	// Render the per-child stem + (if a label exists) a label, plus an
 	// invisible hit zone wide enough to be double-clickable.
@@ -181,7 +232,8 @@ function drawGroup(
 		stemTopY: number,
 		stemBotY: number,
 	) => {
-		addPath(g, stemPathD, stroke, strokeWidth);
+		const stemStyle = styleFor(childId);
+		addPath(g, stemPathD, stemStyle.color, strokeWidth, dashArrayFor(stemStyle.lineStyle));
 		if (!labelHooks) return;
 
 		// Position the label at the midpoint of the stem's vertical extent.
@@ -223,7 +275,7 @@ function drawGroup(
 	const barLeft = Math.min(sortedX[0], midX);
 	const barRight = Math.max(sortedX[sortedX.length - 1], midX);
 
-	addPath(g, `M${barLeft},${dropY} H${barRight}`, stroke, strokeWidth);
+	addPath(g, `M${barLeft},${dropY} H${barRight}`, trunkStyle.color, strokeWidth, dashArrayFor(trunkStyle.lineStyle));
 
 	for (const c of childData) {
 		const stemBotY = c.pos.y - c.r;
@@ -309,6 +361,7 @@ function addPath(
 	d: string,
 	stroke: string,
 	strokeWidth: number,
+	dashArray?: string,
 ): void {
 	const path = activeDocument.createElementNS(SVG_NS, "path");
 	path.setAttribute("d", d);
@@ -316,6 +369,7 @@ function addPath(
 	path.setAttribute("stroke", stroke);
 	path.setAttribute("stroke-width", String(strokeWidth));
 	path.setAttribute("stroke-linecap", "square");
+	if (dashArray) path.setAttribute("stroke-dasharray", dashArray);
 	parent.appendChild(path);
 }
 

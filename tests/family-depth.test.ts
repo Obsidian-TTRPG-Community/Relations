@@ -126,4 +126,54 @@ describe("filterFamilyNeighborhood", () => {
 		expect(result.nodes).toHaveLength(0);
 		expect(result.edges).toHaveLength(0);
 	});
+
+	describe("keepAllEdgeTypes", () => {
+		function ally(a: string, b: string): GraphEdge {
+			return { source: a, target: b, type: "ally", color: "#0f0", symmetric: true, pair: false, lineStyle: "solid", genealogy: false };
+		}
+
+		it("without the flag, drops a non-genealogy/pair edge between two included nodes (unchanged default)", () => {
+			const graph: RelationsGraph = {
+				nodes: [node("Focus"), node("P"), node("Sibling")],
+				edges: [gen("Focus", "P"), gen("Sibling", "P"), ally("Focus", "Sibling")],
+			};
+			const result = filterFamilyNeighborhood(graph, "Focus", 2);
+			expect(ids(result)).toEqual(["Focus", "P"]); // Sibling isn't reachable at all — see limitation test below
+			expect(result.edges.some((e) => e.type === "ally")).toBe(false);
+		});
+
+		it("with the flag, keeps a non-genealogy/pair edge between two nodes that ARE included (e.g. parent + ally)", () => {
+			const graph: RelationsGraph = {
+				nodes: [node("Focus"), node("P"), node("Ally")],
+				edges: [gen("Focus", "P"), ally("P", "Ally")],
+			};
+			// Ally isn't genealogy/pair, so it never pulls Ally into the neighborhood —
+			// node membership is unaffected by the flag either way.
+			const withFlag = filterFamilyNeighborhood(graph, "Focus", 2, true);
+			expect(ids(withFlag)).toEqual(["Focus", "P"]);
+			expect(withFlag.edges.some((e) => e.type === "ally")).toBe(false);
+		});
+
+		it("with the flag, keeps a non-genealogy edge between focus and an included ancestor", () => {
+			const graph: RelationsGraph = {
+				nodes: [node("Focus"), node("P")],
+				edges: [gen("Focus", "P"), ally("Focus", "P")],
+			};
+			const withoutFlag = filterFamilyNeighborhood(graph, "Focus", 1);
+			expect(withoutFlag.edges.some((e) => e.type === "ally")).toBe(false);
+
+			const withFlag = filterFamilyNeighborhood(graph, "Focus", 1, true);
+			expect(withFlag.edges.some((e) => e.type === "ally")).toBe(true);
+			expect(withFlag.edges).toHaveLength(2); // both the genealogy edge and the ally edge
+		});
+
+		it("known limitation: does not pull in a sibling reachable only via a shared parent", () => {
+			const graph: RelationsGraph = {
+				nodes: [node("Focus"), node("P"), node("Sibling")],
+				edges: [gen("Focus", "P"), gen("Sibling", "P")],
+			};
+			const result = filterFamilyNeighborhood(graph, "Focus", 5, true);
+			expect(ids(result)).toEqual(["Focus", "P"]); // Sibling still excluded even with keepAllEdgeTypes
+		});
+	});
 });
