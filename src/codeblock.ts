@@ -4,6 +4,7 @@ import { RelationsSettings, PositionStore, EdgeLabelStore, RelationshipType } fr
 import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes, localSubgraph } from "./graph";
 import { renderGraph, synthesizeInformalPartnerships, INFORMAL_PARTNERSHIP_LEGEND } from "./render";
 import { renderFilterPanel } from "./filter-panel";
+import { findHierarchy, buildOrganizationGraph } from "./organization-hierarchies";
 import type { GraphCache } from "./graph-cache";
 
 export type EmbedSize = "mini" | "small" | "large";
@@ -26,6 +27,14 @@ interface CodeBlockOptions {
 	                          // showNodeLabels setting for this block only
 	spacing?: number;
 	id?: string;
+	orgHierarchy?: string;    // name of a settings-defined organization hierarchy;
+	                          // when set, this block renders the host note's org
+	                          // structure instead of a relationship graph — see
+	                          // organization-hierarchies.ts
+	orgMode?: "tree" | "graph"; // which layout to use for the org view. "tree":
+	                          // top-down dagre. "graph": force-directed (fcose/
+	                          // cose per the global layout setting). Set via
+	                          // org-tree:/org-graph: — see resolveOrgMode.
 }
 
 const DEFAULTS: CodeBlockOptions = {
@@ -189,6 +198,15 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		const hostPath = this.options.center ?? this.sourcePath;
 		const hostFile = resolveHostFile(this.app, hostPath, this.sourcePath);
 
+		const saved = this.options.id && this.store ? this.store.get(this.options.id) : null;
+		this.locked = !!(saved && saved.locked);
+		const presetPositions = this.locked && saved ? saved.positions : undefined;
+
+		if (this.options.orgHierarchy) {
+			this.renderOrganization(el, canvas, effectiveSize, hostFile, presetPositions);
+			return;
+		}
+
 		let graph;
 		let highlightId: string | undefined;
 
@@ -248,10 +266,6 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			return;
 		}
 
-		const saved = this.options.id && this.store ? this.store.get(this.options.id) : null;
-		this.locked = !!(saved && saved.locked);
-		const presetPositions = this.locked && saved ? saved.positions : undefined;
-
 		this.cy = renderGraph({
 			app: this.app,
 			settings: this.settings,
@@ -292,6 +306,73 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		// Shares the same persisted state as the side-panel view. Skipped on mini
 		// embeds (no room) though the filter itself still applies to them.
 		if (effectiveSize !== "mini") this.addFilterControl(el);
+	}
+
+	/**
+	 * Render an organization-hierarchy graph (the `org-tree:`/`org-graph:`
+	 * code-block parameters), a distinct rendering path from the relationship-
+	 * graph modes above: no scope/depth/family concepts, no relationship-type
+	 * filter panel — just the host note's rank structure for one settings-
+	 * defined hierarchy. Reuses the same renderGraph() core (pan/zoom/click-to-
+	 * open/lock-in-place) so the interaction model stays consistent with every
+	 * other graph in the plugin.
+	 */
+	private renderOrganization(
+		el: HTMLElement,
+		canvas: HTMLElement,
+		effectiveSize: EmbedSize,
+		hostFile: TFile | null,
+		presetPositions: Record<string, { x: number; y: number }> | undefined,
+	): void {
+		const orgName = this.options.orgHierarchy!;
+		const hierarchy = findHierarchy(this.settings, orgName);
+		if (!hierarchy) {
+			canvas.createDiv({ cls: "relations-empty", text: `Hierarchy "${orgName}" not found in settings.` });
+			return;
+		}
+		if (!hostFile) {
+			canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for organization view." });
+			return;
+		}
+
+		const result = buildOrganizationGraph(this.app, this.settings, hierarchy, hostFile);
+		if ("error" in result) {
+			canvas.createDiv({ cls: "relations-empty", text: result.error });
+			return;
+		}
+
+		this.cy = renderGraph({
+			app: this.app,
+			settings: this.settings,
+			container: canvas,
+			graph: result.graph,
+			// org-tree: forces the classic top-down dagre layout; org-graph: forces
+			// force-directed (fcose/cose per the global "Default layout" setting) —
+			// same split as family-tree/family-graph.
+			useTreeLayout: this.options.orgMode === "tree",
+			compact: effectiveSize === "mini",
+			zoomMultiplier: this.options.zoom,
+			showLabels: this.options.labels,
+			presetPositions,
+			labelStore: this.labelStore,
+			editableLabels: false,
+		});
+
+		if (effectiveSize !== "mini") this.addLockControl(el);
+
+		if (effectiveSize !== "mini" && this.settings.showLegend && result.legend.length > 0) {
+			const legendTypes: RelationshipType[] = result.legend.map((entry) => ({
+				name: entry.name,
+				color: entry.color,
+				symmetric: true,
+				pair: false,
+				treeLayout: false,
+				lineStyle: "solid",
+				genealogy: false,
+			}));
+			const legend = el.createDiv({ cls: "relations-legend" });
+			renderLegend(legend, legendTypes);
+		}
 	}
 
 	private addFilterControl(host: HTMLElement): void {
@@ -455,6 +536,35 @@ export function resolveFamilyMode(parsed: Record<string, unknown>): "graph" | "t
 	return undefined;
 }
 
+export interface OrgModeResult {
+	mode: "tree" | "graph";
+	name: string;
+}
+
+/**
+ * Resolve which organization-hierarchy view (if any) a code block requests.
+ * Mirrors resolveFamilyMode's org-tree/org-graph split, but — unlike family
+ * mode, which always targets the host note's implicit family neighbourhood —
+ * an org view also needs to know WHICH hierarchy to render, so each key takes
+ * the hierarchy name as its value rather than a bare boolean:
+ *   org-tree: Hierarchy  → "tree":  top-down dagre layout.
+ *   org-graph: Hierarchy → "graph": force-directed (fcose/cose per the global
+ *     "Default layout" setting).
+ * If both are set, tree wins. Pure (no Obsidian deps) so it can be unit-tested
+ * directly.
+ */
+export function resolveOrgMode(parsed: Record<string, unknown>): OrgModeResult | undefined {
+	const treeVal = parsed["org-tree"];
+	if (typeof treeVal === "string" && treeVal.trim()) {
+		return { mode: "tree", name: treeVal.trim() };
+	}
+	const graphVal = parsed["org-graph"];
+	if (typeof graphVal === "string" && graphVal.trim()) {
+		return { mode: "graph", name: graphVal.trim() };
+	}
+	return undefined;
+}
+
 function parseOptions(source: string): ParsedOptions {
 	let parsed: Record<string, unknown> = {};
 	try {
@@ -485,6 +595,9 @@ function parseOptions(source: string): ParsedOptions {
 	const tree = parsed["tree"] === true;
 	const familyMode = resolveFamilyMode(parsed);
 	const center = typeof parsed["center"] === "string" ? parsed["center"] : undefined;
+	const orgResolved = resolveOrgMode(parsed);
+	const orgHierarchy = orgResolved?.name;
+	const orgMode = orgResolved?.mode;
 
 	// labels: explicit true/false hides or shows note names for this block,
 	// overriding the global setting. Undefined = inherit the setting.
@@ -540,7 +653,7 @@ function parseOptions(source: string): ParsedOptions {
 			? String(rawId)
 			: undefined;
 
-	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, sizeExplicit, depthExplicit };
+	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, orgHierarchy, orgMode, sizeExplicit, depthExplicit };
 }
 
 function resolveHostFile(app: App, hostPath: string, sourcePath: string): TFile | null {
