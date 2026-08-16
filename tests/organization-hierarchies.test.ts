@@ -94,9 +94,14 @@ describe("toFieldName", () => {
 });
 
 describe("validateLevels", () => {
-	it("requires at least 2 levels", () => {
-		const { errors } = validateLevels([lvl(1, "Leader")]);
-		expect(errors).toContain("At least 2 levels are required.");
+	it("requires at least 1 level", () => {
+		const { errors } = validateLevels([]);
+		expect(errors).toContain("At least 1 level is required.");
+	});
+
+	it("accepts a single level with no errors", () => {
+		const { errors } = validateLevels([lvl(1, "Members")]);
+		expect(errors).toEqual([]);
 	});
 
 	it("accepts a normal 1..4 sequence with no errors or warnings", () => {
@@ -371,6 +376,29 @@ describe("buildOrganizationGraph", () => {
 		if ("error" in result) throw new Error("expected a graph");
 		const chainEdge = result.graph.edges.find((e) => e.source === "Bob.md" && e.target === "org-hub::officers");
 		expect(chainEdge?.lineStyle).toBe("dashed");
+	});
+
+	it("renders a single-level hierarchy as a flat hub with no rank-chaining edges", () => {
+		const flat: OrganizationHierarchy = {
+			name: "Flat",
+			levels: [{ level: 1, name: "Members" }],
+		};
+		const app = makeFakeApp([
+			{ path: "Group.md", frontmatter: { members: ["[[A]]", "[[B]]", "[[C]]"] } },
+			{ path: "A.md", frontmatter: {} },
+			{ path: "B.md", frontmatter: {} },
+			{ path: "C.md", frontmatter: {} },
+		]);
+		const result = buildOrganizationGraph(app, settings(), flat, fileFor(app, "Group.md"));
+		if ("error" in result) throw new Error("expected a graph");
+		expect(result.legend).toEqual([{ name: "Members", color: result.legend[0].color }]);
+		const hub = result.graph.nodes.find((n) => n.id === "org-hub::members");
+		expect(hub).toBeDefined();
+		// Only the hub's fan-out edges to its members — nothing chaining ranks,
+		// since there's only one rank.
+		expect(result.graph.edges).toHaveLength(3);
+		expect(result.graph.edges.every((e) => e.source === "org-hub::members")).toBe(true);
+		expect(result.graph.nodes.map((n) => n.id).sort()).toEqual(["A.md", "B.md", "C.md", "org-hub::members"]);
 	});
 
 	it("keeps unresolved links visible as plain nodes instead of dropping them", () => {

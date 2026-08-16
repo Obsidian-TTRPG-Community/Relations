@@ -103,7 +103,7 @@ export interface LevelValidation {
 
 /**
  * Validate a set of level rows against the spec's hard/soft rules:
- *  - at least 2 levels
+ *  - at least 1 level
  *  - level numbers are positive integers, no duplicates
  *  - every level has a non-empty name
  *  - (soft) gaps in numbering produce a warning, not an error
@@ -112,8 +112,8 @@ export function validateLevels(levels: LevelDraft[]): LevelValidation {
 	const errors: string[] = [];
 	const warnings: string[] = [];
 
-	if (levels.length < 2) {
-		errors.push("At least 2 levels are required.");
+	if (levels.length < 1) {
+		errors.push("At least 1 level is required.");
 	}
 
 	const counts = new Map<number, number>();

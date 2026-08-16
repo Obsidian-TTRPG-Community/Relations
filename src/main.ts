@@ -172,12 +172,12 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 		}
 		// organizationHierarchies: older settings won't have it; fall back to the
 		// default ("Party Structure"). Also drop malformed entries (missing name
-		// or fewer than 2 levels) rather than letting them crash the settings UI.
+		// or no levels) rather than letting them crash the settings UI.
 		if (!Array.isArray(this.settings.organizationHierarchies)) {
 			this.settings.organizationHierarchies = DEFAULT_SETTINGS.organizationHierarchies;
 		} else {
 			this.settings.organizationHierarchies = this.settings.organizationHierarchies.filter(
-				(h) => h && typeof h.name === "string" && h.name.trim() && Array.isArray(h.levels) && h.levels.length >= 2,
+				(h) => h && typeof h.name === "string" && h.name.trim() && Array.isArray(h.levels) && h.levels.length >= 1,
 			);
 		}
 	}
