@@ -199,9 +199,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		// computed over the already-group-filtered edge set — otherwise a note
 		// reachable only through a hidden-group edge could survive as a
 		// seemingly-disconnected orphan kept alive by some other edge of its
-		// own. (The equivalent bug for the global type filter, disabledTypes,
-		// is a separate, pre-existing issue tracked as #28/#29 and isn't
-		// addressed here.)
+		// own. The build* functions filter disabledTypes the same way (#28).
 		const groups = this.options.groups && this.options.groups.length > 0
 			? new Set(this.options.groups)
 			: undefined;
@@ -254,6 +252,8 @@ class RelationsBlockChild extends MarkdownRenderChild {
 
 		// Honour the global type filter (shared with the side-panel view). The
 		// host/center note is kept even if filtering would otherwise isolate it.
+		// Scoped views already filtered before walking (#28), so this only
+		// changes `scope: full`; for the others it's a harmless no-op.
 		graph = filterGraphByTypes(graph, new Set(this.settings.disabledTypes), highlightId);
 
 		if (graph.nodes.length === 0) {

@@ -65,6 +65,26 @@ Open these notes and look at the graph. The same person shows a different name d
 - [[Lancelot]]: Guinevere says **My Lady**
 - [[Arthur]]: no nicknames, so everyone shows their real name
 
+## Only some kinds of relationships
+
+First, in **Settings → Relations**, type `Family` into the **Group** box for `family` and `parent`, and `Social` for `ally`, `enemy`, `friend` and `rival`.
+
+Arthur's family only:
+
+```relations
+center: "[[Arthur]]"
+groups: Family
+```
+
+Arthur's friends and enemies only:
+
+```relations
+center: "[[Arthur]]"
+groups: Social
+```
+
+If these only show Arthur on his own, the Group boxes haven't been filled in yet.
+
 ## Try this
 
 1. Open the **NPC Relationships** view (users icon, left ribbon)

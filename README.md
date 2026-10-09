@@ -128,7 +128,41 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | `labels`      | (inherits setting)     | `true`/`false` to show or hide note names under nodes for this block, overriding the global **Show node labels** setting |
 | `spacing`     | `1.0` (`0.55` in mini) | family views only: node spacing multiplier. Lower = tighter tree with shorter edges and larger nodes (good for infoboxes); higher = more spread out. Range `0.2`–`3` |
 | `id`          | none                   | a stable identifier for this block. Required to **lock** the layout — see below |
-| `groups`      | none (no filtering)    | show only edges whose relationship type is in one of these groups (OR logic), e.g. `groups: "Social, Bond"` or `groups: ["Social", "Bond"]`. Strict match — ungrouped types are excluded once this is set. Groups are defined per relationship type in **Settings**. Composes with the global type filter, which is applied first |
+| `groups`      | none (show everything) | only show some kinds of relationships, e.g. `groups: Social` or `groups: "Social, Family"`. See [Show only some kinds of relationships](#show-only-some-kinds-of-relationships) |
+
+
+### Show only some kinds of relationships
+
+Sometimes a graph gets crowded. On a family page you might only want family. On a guild page you might only want friends and enemies. `groups:` lets you pick.
+
+**Step 1: put your relationship types into groups.** Open **Settings → Relations**. Each relationship type has a **Group** box. Type the same word into the boxes of types that belong together, for example:
+
+| Type | Group |
+|---|---|
+| ally, enemy, friend, rival | Social |
+| family, parent | Family |
+| spouse, lover | Love |
+
+**Step 2: ask for a group in your code block.**
+
+````markdown
+```relations
+groups: Social
+```
+````
+
+Now this graph only shows Social lines (ally, enemy, friend, rival). Family and Love lines are hidden, along with anyone who was only connected by them.
+
+Want more than one group? Use a comma: `groups: "Social, Love"`.
+
+**Good to know**
+
+- Big or small letters don't matter: `social` works the same as `Social`.
+- A type with an empty Group box is hidden whenever you use `groups:`.
+- Leave `groups:` out and you see everything, just like before.
+- This only changes the one code block. Other graphs aren't affected.
+- If someone is only connected through a hidden line, they're hidden too. You won't get people floating around with no line back to your note.
+- The same is true when you switch a type off with the filter button in the side panel.
 
 ## Family views
 

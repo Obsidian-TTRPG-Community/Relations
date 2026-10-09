@@ -77,12 +77,11 @@ export function perspectiveLabel(
  * For scope: local / connected / family, callers (buildLocalGraph,
  * buildConnectedGraph, buildFamilyNeighborhood) apply this filter to the full
  * graph BEFORE walking the hop-limited neighborhood, so hop distance is
- * computed over the already-group-filtered edge set. A note reachable only
- * through a hidden-group edge is excluded entirely rather than surfacing as a
+ * computed over the already-group-filtered edge set (see filterBeforeWalk,
+ * which applies disabledTypes the same way). A note reachable only through a
+ * hidden-group edge is excluded entirely rather than surfacing as a
  * seemingly-disconnected orphan kept alive by some other edge of its own.
- * (The equivalent bug for the global type filter — disabledTypes — is a
- * separate, pre-existing issue and is intentionally NOT addressed here; see
- * #28/#29.) When calling this function directly on an already hop-limited
+ * When calling this function directly on an already hop-limited
  * graph, the pre-walk guarantee doesn't apply — filtering after the fact can
  * still leave such orphans.
  *
@@ -99,6 +98,10 @@ export function filterGraphByGroups(
 ): RelationsGraph {
 	if (enabledGroups.size === 0) return graph;
 
+	// Group names match case-insensitively (`groups: social` finds "Social"),
+	// the same way relationship property names already do.
+	const wanted = new Set([...enabledGroups].map((g) => g.trim().toLowerCase()));
+
 	// Build a map of type name → type definition for quick group lookup
 	const typeMap = new Map<string, RelationshipType>();
 	for (const t of relationshipTypes) {
@@ -110,7 +113,8 @@ export function filterGraphByGroups(
 	const edges = graph.edges.filter((e) => {
 		const type = typeMap.get(e.type);
 		if (!type) return true;  // Type not found, include it (defensive)
-		return type.group ? enabledGroups.has(type.group) : false;
+		const group = type.group?.trim().toLowerCase();
+		return group ? wanted.has(group) : false;
 	});
 
 	// Prune nodes left with no remaining edges
@@ -123,7 +127,27 @@ export function filterGraphByGroups(
 		(n) => connected.has(n.id) || n.id === keepNodeId,
 	);
 
-	return { nodes, edges };
+	return withDisplayNames(graph, { nodes, edges });
+}
+
+/**
+ * Hide what the user asked to hide BEFORE a scoped view walks outward from
+ * its center note: the global disabled-types filter (issue #28) and, for code
+ * blocks, a `groups:` filter (issue #16). Walking first and filtering after
+ * left notes that were reachable only through a hidden edge on screen as
+ * disconnected orphans, kept alive by some other visible edge of their own.
+ */
+function filterBeforeWalk(
+	full: RelationsGraph,
+	settings: RelationsSettings,
+	centerPath: string,
+	groups?: ReadonlySet<string>,
+): RelationsGraph {
+	let g = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
+	if (groups && groups.size > 0) {
+		g = filterGraphByGroups(g, groups, centerPath, settings.relationshipTypes);
+	}
+	return g;
 }
 
 /**
@@ -285,8 +309,7 @@ export function buildFullGraph(
  * neighborhood is walked, so hop distance reflects only edges in a visible
  * group. A note reachable solely through a hidden-group edge is excluded
  * entirely, rather than surfacing as an orphan kept alive by an unrelated
- * visible edge of its own. (disabledTypes has no such guarantee yet — see
- * filterGraphByGroups's doc comment.)
+ * visible edge of its own. Disabled types are filtered the same way.
  */
 export function buildLocalGraph(
 	app: App,
@@ -307,9 +330,7 @@ export function buildLocalGraph(
 		return { nodes: [], edges: [] };
 	}
 
-	const filtered = groups && groups.size > 0
-		? filterGraphByGroups(full, groups, centerPath, settings.relationshipTypes)
-		: full;
+	const filtered = filterBeforeWalk(full, settings, centerPath, groups);
 	return localSubgraph(filtered, centerPath, depth);
 }
 
@@ -453,9 +474,7 @@ export function buildConnectedGraph(
 		}
 		return { nodes: [], edges: [] };
 	}
-	const filtered = groups && groups.size > 0
-		? filterGraphByGroups(full, groups, centerPath, settings.relationshipTypes)
-		: full;
+	const filtered = filterBeforeWalk(full, settings, centerPath, groups);
 	return connectedComponent(filtered, centerPath);
 }
 
@@ -474,8 +493,7 @@ export function buildConnectedGraph(
  *
  * An optional groups filter is applied to the full graph before the genealogy
  * walk, so a hidden-group parent/child relationship type can't pull an
- * otherwise-hidden ancestor or descendant into the neighborhood. (disabledTypes
- * has no such guarantee yet — see filterGraphByGroups's doc comment.)
+ * otherwise-hidden ancestor or descendant into the neighborhood. Disabled types are filtered the same way.
  */
 export function buildFamilyNeighborhood(
 	app: App,
@@ -496,9 +514,7 @@ export function buildFamilyNeighborhood(
 		return { nodes: [], edges: [] };
 	}
 
-	const filtered = groups && groups.size > 0
-		? filterGraphByGroups(full, groups, focusPath, settings.relationshipTypes)
-		: full;
+	const filtered = filterBeforeWalk(full, settings, focusPath, groups);
 	return filterFamilyNeighborhood(filtered, focusPath, depth);
 }
 
