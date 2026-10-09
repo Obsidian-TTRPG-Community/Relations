@@ -65,6 +65,10 @@ Open these notes and look at the graph. The same person shows a different name d
 - [[Lancelot]]: Guinevere says **My Lady**
 - [[Arthur]]: no nicknames, so everyone shows their real name
 
+## Notes you haven't written yet
+
+[[Uther]] has an enemy, Gorlois, who doesn't have a note yet. Open Uther and Gorlois shows up as a faded circle. Click it to create his note.
+
 ## Only some kinds of relationships
 
 First, in **Settings → Relations**, type `Family` into the **Group** box for `family` and `parent`, and `Social` for `ally`, `enemy`, `friend` and `rival`.

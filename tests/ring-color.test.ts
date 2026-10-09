@@ -33,6 +33,7 @@ function makeSettings(
 		layout: "fcose",
 		disabledTypes: [],
 		showNodeLabels: true,
+		showMissingNotes: true,
 		localGraphDepth: 2,
 		animateLayout: true,
 		ringColorProperty: property,

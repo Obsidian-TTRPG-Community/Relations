@@ -85,30 +85,30 @@ function node(graph: RelationsGraph, id: string) {
 
 describe("extractLinks", () => {
 	it("returns no alias for plain wikilinks", () => {
-		expect(extractLinks("[[Alice]]")).toEqual([{ target: "Alice" }]);
+		expect(extractLinks("[[Alice]]")).toEqual([{ target: "Alice", wikilink: true }]);
 	});
 
 	it("captures the alias from [[Target|Alias]]", () => {
 		expect(extractLinks("[[Meine Wald|The Enlightened One]]")).toEqual([
-			{ target: "Meine Wald", alias: "The Enlightened One" },
+			{ target: "Meine Wald", alias: "The Enlightened One", wikilink: true },
 		]);
 	});
 
 	it("strips a heading from the target but keeps the alias", () => {
-		expect(extractLinks("[[Bob#Early life|Bobby]]")).toEqual([{ target: "Bob", alias: "Bobby" }]);
+		expect(extractLinks("[[Bob#Early life|Bobby]]")).toEqual([{ target: "Bob", alias: "Bobby", wikilink: true }]);
 	});
 
 	it("trims the alias and ignores an empty one", () => {
-		expect(extractLinks("[[Bob|  Bobby  ]]")).toEqual([{ target: "Bob", alias: "Bobby" }]);
-		expect(extractLinks("[[Bob|]]")).toEqual([{ target: "Bob" }]);
-		expect(extractLinks("[[Bob|   ]]")).toEqual([{ target: "Bob" }]);
+		expect(extractLinks("[[Bob|  Bobby  ]]")).toEqual([{ target: "Bob", alias: "Bobby", wikilink: true }]);
+		expect(extractLinks("[[Bob|]]")).toEqual([{ target: "Bob", wikilink: true }]);
+		expect(extractLinks("[[Bob|   ]]")).toEqual([{ target: "Bob", wikilink: true }]);
 	});
 
 	it("handles lists and multiple wikilinks in one string", () => {
-		expect(extractLinks(["[[A|Ay]]", "[[B]]"])).toEqual([{ target: "A", alias: "Ay" }, { target: "B" }]);
+		expect(extractLinks(["[[A|Ay]]", "[[B]]"])).toEqual([{ target: "A", alias: "Ay", wikilink: true }, { target: "B", wikilink: true }]);
 		expect(extractLinks("[[A|Ay]], [[B|Bee]]")).toEqual([
-			{ target: "A", alias: "Ay" },
-			{ target: "B", alias: "Bee" },
+			{ target: "A", alias: "Ay", wikilink: true },
+			{ target: "B", alias: "Bee", wikilink: true },
 		]);
 	});
 
@@ -158,14 +158,17 @@ describe("buildFullGraph display names", () => {
 		expect(node(graph, "B.md").label).toBe("B");
 	});
 
-	it("skips aliases on unresolved, self and out-of-scope links", () => {
+	it("skips aliases on self and out-of-scope links, and keeps them for missing notes", () => {
 		const app = makeFakeApp([
 			{ path: "In/A.md", frontmatter: { ally: ["[[Ghost|Boo]]", "[[A|Me]]", "[[B|Bee]]", "[[C|Sea]]"] } },
 			{ path: "In/B.md", frontmatter: {} },
 			{ path: "Out/C.md", frontmatter: {} },
 		]);
 		const graph = buildFullGraph(app, settingsWith([type("ally")], { folderScopes: ["In"] }));
-		expect([...(graph.displayNames?.get("In/A.md") ?? new Map())]).toEqual([["In/B.md", "Bee"]]);
+		expect([...(graph.displayNames?.get("In/A.md") ?? new Map())]).toEqual([
+			["missing:ghost", "Boo"],
+			["In/B.md", "Bee"],
+		]);
 	});
 
 	it("keys declares-child aliases by the declaring note, not the swapped edge", () => {

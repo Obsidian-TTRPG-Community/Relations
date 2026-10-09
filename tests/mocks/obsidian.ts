@@ -8,7 +8,7 @@ export class Menu {
 	showAtMouseEvent() {}
 }
 export class CachedMetadata {}
-export function getAllTags(): string[] { return []; }
+export function getAllTags(cache?: { tags?: { tag: string }[] }): string[] { return cache?.tags?.map((t) => t.tag) ?? []; }
 export function normalizePath(p: string): string { return p; }
 
 // Stubs so modules importing these (e.g. codeblock.ts) link in the test runtime.

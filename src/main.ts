@@ -7,6 +7,7 @@ import {
 	PositionStore,
 	LockedLayout,
 	EdgeLabelStore,
+	migrateRelationshipType,
 } from "./types";
 import { RelationsView } from "./view";
 import { RelationsSettingTab } from "./settings";
@@ -129,26 +130,7 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 			this.settings.relationshipTypes = DEFAULT_SETTINGS.relationshipTypes;
 		}
 		// Migration: older settings might be missing the new per-type flags.
-		this.settings.relationshipTypes = this.settings.relationshipTypes.map((t) => {
-			const partial = t as Partial<typeof t>;
-			const validStyles = ["solid", "dashed", "dotted", "double"] as const;
-			const ls = partial.lineStyle as typeof validStyles[number] | undefined;
-			return {
-				name: t.name,
-				color: t.color,
-				symmetric: t.symmetric ?? true,
-				pair: partial.pair ?? false,
-				treeLayout: partial.treeLayout ?? false,
-				lineStyle: ls && validStyles.includes(ls) ? ls : "solid",
-				// genealogy default: only `parent` (case-insensitive) starts as true so
-				// existing users with a parent type still get a sensible family-graph view.
-				genealogy: partial.genealogy ?? (t.name.toLowerCase() === "parent"),
-				// Optional cosmetic legend group. The map reconstructs each type
-				// with an explicit field list, so this must be carried through or
-				// it would be silently dropped on every load.
-				group: typeof partial.group === "string" ? partial.group : "",
-			};
-		});
+		this.settings.relationshipTypes = this.settings.relationshipTypes.map(migrateRelationshipType);
 		// disabledTypes: filter state for relationship types. Older settings won't
 		// have it; default to an empty array (everything visible). Also drop any
 		// stale entries that no longer correspond to a configured type.

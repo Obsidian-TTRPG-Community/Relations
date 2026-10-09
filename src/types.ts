@@ -65,6 +65,11 @@ export interface RelationsSettings {
 	// overridden per code-block with `labels: false`.
 	showNodeLabels: boolean;
 
+	// Show relationship links to notes that don't exist yet as faded "missing"
+	// nodes (issue #18), the way Obsidian's own graph shows unresolved links.
+	// Off = such links are ignored, as before 0.28.0.
+	showMissingNotes: boolean;
+
 	// Local graph: how many hops out from the active note
 	localGraphDepth: number;
 
@@ -129,6 +134,7 @@ export const DEFAULT_SETTINGS: RelationsSettings = {
 	layout: "fcose",
 	disabledTypes: [],
 	showNodeLabels: true,
+	showMissingNotes: true,
 	localGraphDepth: 2,
 	animateLayout: true,
 	ringColorProperty: "",
@@ -162,6 +168,15 @@ export interface GraphNode {
 	bottomLeftIcon?: string;
 	bottomRightIcon?: string;
 	subtext?: string;
+	// Missing note (issue #18): a `[[link]]` in a relationship property that
+	// doesn't resolve to any file yet. Drawn faded with a dashed border, like
+	// Obsidian's own graph draws unresolved links. `id` is then a synthetic
+	// "missing:<link>" key, not a file path; `linkText` is the link as written
+	// (used to create the note on click) and `linkSource` the first note that
+	// linked to it (so creation follows Obsidian's relative-path rules).
+	missing?: boolean;
+	linkText?: string;
+	linkSource?: string;
 }
 
 export interface GraphEdge {
@@ -244,3 +259,34 @@ export const VIEW_TYPE_RELATIONS = "relations-graph";
 // `npc-graph` is kept as a permanent alias so existing blocks in user notes still
 // render after the rename.
 export const RELATIONS_CODE_BLOCKS = ["relations", "npc-graph"] as const;
+
+/**
+ * Bring a relationship type loaded from data.json up to the current shape,
+ * filling defaults for flags older versions didn't have. Every field is
+ * listed explicitly, so a new RelationshipType field MUST be added here or it
+ * is silently dropped on every load (that's what happened to `declaresChild`,
+ * issue #24).
+ */
+export function migrateRelationshipType(t: RelationshipType): RelationshipType {
+	const partial = t as Partial<typeof t>;
+	const validStyles = ["solid", "dashed", "dotted", "double"] as const;
+	const ls = partial.lineStyle as typeof validStyles[number] | undefined;
+	return {
+		name: t.name,
+		color: t.color,
+		symmetric: t.symmetric ?? true,
+		pair: partial.pair ?? false,
+		treeLayout: partial.treeLayout ?? false,
+		lineStyle: ls && validStyles.includes(ls) ? ls : "solid",
+		// genealogy default: only `parent` (case-insensitive) starts as true so
+		// existing users with a parent type still get a sensible family-graph view.
+		genealogy: partial.genealogy ?? (t.name.toLowerCase() === "parent"),
+		// Optional cosmetic legend group. The map reconstructs each type
+		// with an explicit field list, so this must be carried through or
+		// it would be silently dropped on every load.
+		group: typeof partial.group === "string" ? partial.group : "",
+		// Same story for the "Child" checkbox (issue #24): without this
+		// line it was reset to off on every reload.
+		declaresChild: partial.declaresChild === true,
+	};
+}

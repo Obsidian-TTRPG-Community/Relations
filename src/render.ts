@@ -455,9 +455,24 @@ export function renderGraph(opts: RenderOptions): Core {
 	container.addEventListener("mouseenter", onMouseEnter);
 	cy.on("destroy", () => container.removeEventListener("mouseenter", onMouseEnter));
 
+	// Missing notes (issue #18) are opened by their link text instead of a path.
+	// openLinkText goes through Obsidian's own link handling, so a link that
+	// still doesn't resolve creates the note exactly as clicking an unresolved
+	// [[link]] in the editor would (honouring the "Default location for new
+	// notes" setting); the file-create event then rebuilds the graph.
+	const missingLink = (node: cytoscape.NodeSingular): { linkText: string; source: string } | null => {
+		const n = graph.nodes.find((x) => x.id === node.id());
+		return n?.missing && n.linkText ? { linkText: n.linkText, source: n.linkSource ?? "" } : null;
+	};
+
 	cy.on("tap", "node", (evt) => {
 		void (async () => {
 			const node = evt.target as cytoscape.NodeSingular;
+			const link = missingLink(node);
+			if (link) {
+				await app.workspace.openLinkText(link.linkText, link.source, false);
+				return;
+			}
 			const path = node.id();
 			const file = app.vault.getAbstractFileByPath(path);
 			if (file instanceof TFile) {
@@ -468,6 +483,18 @@ export function renderGraph(opts: RenderOptions): Core {
 
 	cy.on("cxttap", "node", (evt) => {
 		const node = evt.target as cytoscape.NodeSingular;
+		const link = missingLink(node);
+		if (link) {
+			const menu = new Menu();
+			menu.addItem((i) => i.setTitle("Create note").setIcon("file-plus").onClick(async () => {
+				await app.workspace.openLinkText(link.linkText, link.source, false);
+			}));
+			menu.addItem((i) => i.setTitle("Create note in new tab").setIcon("plus").onClick(async () => {
+				await app.workspace.openLinkText(link.linkText, link.source, "tab");
+			}));
+			menu.showAtMouseEvent(evt.originalEvent);
+			return;
+		}
 		const path = node.id();
 		const file = app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return;
@@ -645,6 +672,7 @@ function toCytoscape(
 		// name label lower when bottom-corner badges would otherwise overlap it.
 		if (n.bottomLeftIcon || n.bottomRightIcon) data.hasBottomBadge = "true";
 		if (n.subtext) data.subtext = n.subtext;
+		if (n.missing) data.missing = "true";
 		out.push({ data });
 	}
 	for (const e of graph.edges) {
@@ -797,6 +825,24 @@ function buildStyle(theme: ThemeColors, compact: boolean, showLabels: boolean): 
 			style: {
 				"border-color": "data(ringColor)",
 				"border-width": 6,
+			},
+		},
+		{
+			// A note that doesn't exist yet (issue #18): faded with a dashed
+			// ring, the same cue Obsidian's own graph uses for unresolved links.
+			// Clicking it creates the note.
+			selector: "node[missing = 'true']",
+			style: {
+				"background-color": theme.bgSecondary,
+				"border-style": "dashed",
+				"border-color": theme.textMuted,
+				"opacity": 0.55,
+			},
+		},
+		{
+			selector: "node[missing = 'true']:selected",
+			style: {
+				"opacity": 0.85,
 			},
 		},
 		{

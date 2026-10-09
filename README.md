@@ -164,6 +164,26 @@ Want more than one group? Use a comma: `groups: "Social, Love"`.
 - If someone is only connected through a hidden line, they're hidden too. You won't get people floating around with no line back to your note.
 - The same is true when you switch a type off with the filter button in the side panel.
 
+### Notes you haven't written yet
+
+You don't have to write every note before you link to it. Say Uther's note says:
+
+```yaml
+enemy: "[[Gorlois]]"
+```
+
+but there's no Gorlois note yet. Gorlois still shows up on the graph as a **faded circle with a dashed edge**. That means "this note doesn't exist yet".
+
+**Click the faded circle to create the note.** Obsidian makes it in your usual new-note folder and opens it, and the circle turns into a normal one.
+
+**Good to know**
+
+- Only real links in `[[ ]]` do this. Plain words like `enemy: Nobody` don't make a circle.
+- `[[gorlois]]` and `[[Gorlois]]` are the same missing note, so you only get one circle.
+- Right-click the circle for **Create note in new tab**.
+- Don't want them? Turn off **Show notes that don't exist yet** in **Settings → Relations**.
+- If you use **Required tags**, missing notes are hidden, because a note that doesn't exist can't have a tag.
+
 ## Family views
 
 Relations has two layouts built for genealogy. Both are focused on the host note and align generations in horizontal rows — parents above, the focus and any partners on the middle row, children below. They differ only in **how connections are drawn**:

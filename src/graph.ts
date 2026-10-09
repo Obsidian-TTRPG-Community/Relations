@@ -175,6 +175,8 @@ export function buildFullGraph(
 
 	const notePaths = new Set<string>();
 	const rawEdges: GraphEdge[] = [];
+	// Links that don't resolve yet: node id → how to label and create the note.
+	const missingNotes = new Map<string, { linkText: string; linkSource: string }>();
 	// declaring note → target note → { alias, rank } (see recordAlias below).
 	const aliases = new Map<string, Map<string, { alias: string; rank: number }>>();
 
@@ -210,16 +212,29 @@ export function buildFullGraph(
 			if (!type) continue;
 
 			const rank = typeRank.get(type.name) ?? Number.MAX_SAFE_INTEGER;
-			for (const { target, alias } of extractLinks(fm[key])) {
+			for (const { target, alias, wikilink } of extractLinks(fm[key])) {
 				const resolved = app.metadataCache.getFirstLinkpathDest(target, file.path);
-				if (!resolved) continue;
-				if (resolved.path === file.path) continue;
-				if (!inScope(resolved, settings)) continue;
+				let targetId: string;
+				if (resolved) {
+					if (resolved.path === file.path) continue;
+					if (!inScope(resolved, settings)) continue;
+					targetId = resolved.path;
+				} else {
+					// A note that doesn't exist yet (issue #18). Only real
+					// `[[links]]` count, matching what Obsidian itself treats as
+					// an unresolved link — a plain-text value like `ally: TBD`
+					// isn't a link to anything.
+					if (!settings.showMissingNotes || !wikilink || !target) continue;
+					targetId = missingNodeId(target);
+					if (!missingNotes.has(targetId)) {
+						missingNotes.set(targetId, { linkText: target, linkSource: file.path });
+					}
+				}
 
 				// Keyed by the DECLARING note → linked note, before any
 				// declares-child swap below: the alias is this note's name for
 				// the other one, whichever way the stored edge ends up pointing.
-				if (alias) recordAlias(file.path, resolved.path, alias, rank);
+				if (alias) recordAlias(file.path, targetId, alias, rank);
 
 				// Genealogy edges are stored child→parent throughout the data
 				// model (matching a `parent: [[X]]` declaration written on the
@@ -231,7 +246,7 @@ export function buildFullGraph(
 				// rewriting to a synthetic type would break every by-name lookup
 				// (filtering, legend, symmetric handling, edge-label keys).
 				let edgeSource = file.path;
-				let edgeTarget = resolved.path;
+				let edgeTarget = targetId;
 				if (type.genealogy && type.declaresChild) {
 					[edgeSource, edgeTarget] = [edgeTarget, edgeSource];
 				}
@@ -248,7 +263,7 @@ export function buildFullGraph(
 				});
 				hasAnyRelationship = true;
 				notePaths.add(file.path);
-				notePaths.add(resolved.path);
+				notePaths.add(targetId);
 			}
 		}
 
@@ -256,6 +271,7 @@ export function buildFullGraph(
 	}
 
 	if (settings.requiredTags.length > 0) {
+		// Missing notes have no file, so no tags: required-tag scoping hides them.
 		for (const path of Array.from(notePaths)) {
 			const f = app.vault.getAbstractFileByPath(path);
 			if (!(f instanceof TFile)) { notePaths.delete(path); continue; }
@@ -268,6 +284,11 @@ export function buildFullGraph(
 
 	const nodes: GraphNode[] = [];
 	for (const path of notePaths) {
+		const missing = missingNotes.get(path);
+		if (missing) {
+			nodes.push(buildMissingNode(path, missing.linkText, missing.linkSource));
+			continue;
+		}
 		const f = app.vault.getAbstractFileByPath(path);
 		if (!(f instanceof TFile)) continue;
 		const node = buildNode(app, f, settings);
@@ -604,6 +625,16 @@ export function filterFamilyNeighborhood(
 	return withDisplayNames(full, { nodes, edges });
 }
 
+/**
+ * A node for a note that doesn't exist yet. Labelled with the link's last path
+ * segment (`[[People/Bob]]` → "Bob"), the name the note will have once made.
+ * No image, tags or badges — there's no frontmatter to read them from.
+ */
+export function buildMissingNode(id: string, linkText: string, linkSource: string): GraphNode {
+	const label = linkText.split("/").pop()?.trim() || linkText;
+	return { id, label, tags: [], image: null, missing: true, linkText, linkSource };
+}
+
 function buildTypeMap(settings: RelationsSettings): Map<string, RelationshipType> {
 	const m = new Map<string, RelationshipType>();
 	for (const t of settings.relationshipTypes) m.set(t.name.toLowerCase(), t);
@@ -771,6 +802,17 @@ function hasRequiredTag(cache: CachedMetadata, requiredTags: string[]): boolean 
 export interface LinkRef {
 	target: string;   // link path, alias and heading stripped — feed to getFirstLinkpathDest
 	alias?: string;   // display text from `[[Target|Alias]]`; wikilinks only
+	wikilink?: true;  // written as `[[...]]` (vs. a plain-text note name)
+}
+
+/**
+ * Node id for a link that doesn't resolve to a file (issue #18). Prefixed so
+ * it can never collide with a real file path, and case-folded so `[[bob]]`
+ * and `[[Bob]]` share one node — they'd resolve to the same note once it
+ * exists, since Obsidian's link resolution is case-insensitive.
+ */
+export function missingNodeId(linkText: string): string {
+	return "missing:" + linkText.trim().toLowerCase();
 }
 
 /**
@@ -795,7 +837,7 @@ export function extractLinks(value: unknown): LinkRef[] {
 	if (matches.length > 0) {
 		return matches.map((m) => {
 			const inner = m[1];
-			const ref: LinkRef = { target: stripAlias(inner) };
+			const ref: LinkRef = { target: stripAlias(inner), wikilink: true };
 			const pipeIdx = inner.indexOf("|");
 			if (pipeIdx >= 0) {
 				const alias = inner.slice(pipeIdx + 1).trim();
