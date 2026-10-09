@@ -235,6 +235,32 @@ Both views behave identically apart from the connector style:
 - **Declared spouses go to the LEFT** of the focus, **informal partners to the RIGHT** — a deterministic convention so the chart reads the same way every time, regardless of the order Obsidian indexed the frontmatter.
 - **Only family appears** — ancestors, descendants, partners. Allies, enemies, mentors and other types are hidden so the family structure reads cleanly. Switch to the Full or Active-note views to see those.
 
+### Write it on the parent's note or the child's note, either works
+
+You can say who someone's parents are **on the child's note**:
+
+```yaml
+# Varinka's note
+parent: "[[Amalayin]]"
+```
+
+or who someone's children are **on the parent's note**:
+
+```yaml
+# Amalayin's note
+children: "[[Varinka]]"
+```
+
+You can even do both. The family tree comes out the same, with one line between them.
+
+**The `parent` type works straight away.** For `children` (or whatever you call it), tell Relations that it points *down* the family tree:
+
+1. Open **Settings → Relations** and find the `children` type. Add it if you don't have one yet.
+2. Tick **Gen** ("this is a family-tree line").
+3. Tick **Child** ("the note this is written on is the *parent*").
+
+If you forget step 3, Relations thinks the child is the parent and draws the tree upside down. If you forget step 2, `children` is treated like `ally` or `enemy` and doesn't show in family views at all.
+
 ### Use `scope: full` to see everything
 
 By default a family view builds a neighbourhood around the active note. To show the whole vault's family in one view, add `scope: full`:
