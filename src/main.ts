@@ -74,6 +74,8 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 					"# spacing: 1.0        # family-graph node spacing; <1 tighter, >1 looser\n" +
 					"# labels: true        # show note names under nodes\n" +
 					"# id: my-graph        # stable id; required to lock node positions in place\n" +
+					"# hide: parent, spouse  # relationship types to hide in this graph (the Filter button edits this)\n" +
+					"# groups: Social      # only show types in these groups (set Group in settings)\n" +
 					"# center: \"[[Other Note]]\"  # focus a different note\n" +
 					"```\n";
 				insertCodeBlock(editor, block);
@@ -88,10 +90,9 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 			this.registerMarkdownCodeBlockProcessor(
 				lang,
 				(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-					processRelationsBlock(this.app, this.settings, source, el, ctx, this.graphCache, this, this, () => {
-						void this.saveSettings();
-						this.refreshGraphView();
-					});
+					// Each embedded graph keeps its own filter in its `hide:` line
+					// (issue #41), so blocks no longer write to global settings.
+					processRelationsBlock(this.app, this.settings, source, el, ctx, this.graphCache, this, this);
 				},
 			);
 		}

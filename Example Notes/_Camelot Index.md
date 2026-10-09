@@ -69,6 +69,24 @@ Open these notes and look at the graph. The same person shows a different name d
 
 [[Uther]] has an enemy, Gorlois, who doesn't have a note yet. Open Uther and Gorlois shows up as a faded circle. Click it to create his note.
 
+## Two graphs, two filters
+
+Each graph has its own **Filter** button. Hiding something in one graph doesn't touch the other. The filter is saved as a `hide:` line in the code block.
+
+Arthur's family:
+
+```relations
+center: "[[Arthur]]"
+hide: ally, enemy, friend, rival, mentor, lover
+```
+
+Everyone else in Arthur's life:
+
+```relations
+center: "[[Arthur]]"
+hide: parent, family, spouse
+```
+
 ## Only some kinds of relationships
 
 First, in **Settings → Relations**, type `Family` into the **Group** box for `family` and `parent`, and `Social` for `ally`, `enemy`, `friend` and `rival`.

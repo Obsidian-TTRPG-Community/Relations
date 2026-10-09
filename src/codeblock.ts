@@ -4,6 +4,7 @@ import { RelationsSettings, PositionStore, EdgeLabelStore, RelationshipType } fr
 import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes, filterGraphByGroups, localSubgraph } from "./graph";
 import { renderGraph, synthesizeInformalPartnerships, INFORMAL_PARTNERSHIP_LEGEND } from "./render";
 import { renderFilterPanel } from "./filter-panel";
+import { replaceBlockBody, setHideInBody } from "./block-source";
 import type { GraphCache } from "./graph-cache";
 
 export type EmbedSize = "mini" | "small" | "large";
@@ -27,6 +28,7 @@ interface CodeBlockOptions {
 	spacing?: number;
 	id?: string;
 	groups?: string[];  // strict filter by relationship type groups (OR logic); ungrouped types are excluded. e.g., ["Social", "Bonds"]
+	hide?: string[];    // relationship types hidden in THIS graph (issue #41). Written by the block's Filter panel.
 }
 
 const DEFAULTS: CodeBlockOptions = {
@@ -39,6 +41,13 @@ const DEFAULTS: CodeBlockOptions = {
  * MarkdownRenderChild lets Obsidian manage lifecycle — onunload runs when the rendered
  * block is removed (note closed, switched to edit mode, etc.) so we can dispose Cytoscape.
  */
+/**
+ * Filter-panel UI state that should survive the block re-rendering after its
+ * own `hide:` line is saved (Obsidian rebuilds the block from the new text, so
+ * instance fields are lost). Keyed by note path + block position.
+ */
+const filterUiState = new Map<string, { open: boolean; expanded: Set<string> }>();
+
 class RelationsBlockChild extends MarkdownRenderChild {
 	private cy: Core | null = null;
 	private locked = false;
@@ -49,16 +58,61 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		private app: App,
 		private settings: RelationsSettings,
 		private options: ParsedOptions,
+		private source: string,
 		private ctx: MarkdownPostProcessorContext,
 		private cache: GraphCache | null,
 		private store: PositionStore | null,
 		private labelStore: EdgeLabelStore | null = null,
-		// Persist + propagate filter changes. Invoked after the block mutates
-		// settings.disabledTypes so the change is saved and other open views
-		// refresh. Null in contexts with no plugin (e.g. unit tests).
-		private onSettingsChange: (() => void) | null = null,
 	) {
 		super(containerEl);
+	}
+
+	/**
+	 * Relationship types hidden in this graph: the block's own `hide:` list,
+	 * matched to configured type names case-insensitively. Embedded graphs no
+	 * longer follow the side panel's filter (issue #41) — each one has its own.
+	 */
+	private hiddenTypes(): string[] {
+		const names = new Map(this.settings.relationshipTypes.map((t) => [t.name.toLowerCase(), t.name]));
+		return (this.options.hide ?? []).map((h) => names.get(h.toLowerCase()) ?? h);
+	}
+
+	/** Settings as this graph sees them: the global ones with its own filter. */
+	private viewSettings(): RelationsSettings {
+		return { ...this.settings, disabledTypes: this.hiddenTypes() };
+	}
+
+	private uiKey(): string | null {
+		const info = this.ctx.getSectionInfo(this.containerEl);
+		return info ? `${this.sourcePath}::${info.lineStart}` : null;
+	}
+
+	/**
+	 * Save this graph's filter as a `hide:` line in its own code block, so it
+	 * sticks, travels with the note, and can be edited by hand. Obsidian then
+	 * re-renders the block from the new text. If the block can't be located
+	 * (e.g. it's shown through an embed of another note), the filter still
+	 * applies until the note is reopened and the user is told why.
+	 */
+	private async saveHidden(hidden: string[]): Promise<void> {
+		this.options.hide = hidden;
+		const info = this.ctx.getSectionInfo(this.containerEl);
+		const file = this.app.vault.getAbstractFileByPath(this.sourcePath);
+		let saved = false;
+		if (info && file instanceof TFile) {
+			const newBody = setHideInBody(this.source, hidden);
+			await this.app.vault.process(file, (data) => {
+				const next = replaceBlockBody(data, info.lineStart, info.lineEnd, this.source, newBody);
+				if (next === null) return data;
+				saved = true;
+				return next;
+			});
+			if (saved) this.source = newBody;
+		}
+		if (!saved) {
+			new Notice("Couldn't save this filter into the note. It applies until you reopen the note. To keep it, add a line like `hide: parent` to the code block.", 8000);
+			this.render();
+		}
 	}
 
 	private get sourcePath(): string {
@@ -217,7 +271,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				return;
 			}
 			const familyDepth = this.options.depthExplicit ? effectiveDepth : undefined;
-			graph = buildFamilyNeighborhood(this.app, this.settings, hostFile.path, familyDepth, this.cache, groups);
+			graph = buildFamilyNeighborhood(this.app, this.viewSettings(), hostFile.path, familyDepth, this.cache, groups);
 			highlightId = hostFile.path;
 		} else if (this.options.scope === "full") {
 			graph = buildFullGraph(this.app, this.settings, this.cache);
@@ -231,7 +285,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for connected graph." });
 				return;
 			}
-			graph = buildConnectedGraph(this.app, this.settings, hostFile.path, this.cache, groups);
+			graph = buildConnectedGraph(this.app, this.viewSettings(), hostFile.path, this.cache, groups);
 			// `connected` normally has no hop limit — it walks the whole
 			// component. But an explicitly written `depth:` shouldn't be
 			// silently ignored, and mini embeds always force a compact 1-hop
@@ -246,15 +300,15 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for local graph." });
 				return;
 			}
-			graph = buildLocalGraph(this.app, this.settings, hostFile.path, effectiveDepth, this.cache, groups);
+			graph = buildLocalGraph(this.app, this.viewSettings(), hostFile.path, effectiveDepth, this.cache, groups);
 			highlightId = hostFile.path;
 		}
 
-		// Honour the global type filter (shared with the side-panel view). The
+		// Honour this graph's own type filter (`hide:`, issue #41). The
 		// host/center note is kept even if filtering would otherwise isolate it.
 		// Scoped views already filtered before walking (#28), so this only
 		// changes `scope: full`; for the others it's a harmless no-op.
-		graph = filterGraphByTypes(graph, new Set(this.settings.disabledTypes), highlightId);
+		graph = filterGraphByTypes(graph, new Set(this.hiddenTypes()), highlightId);
 
 		if (graph.nodes.length === 0) {
 			canvas.createDiv({
@@ -308,9 +362,9 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			}
 		}
 
-		// Type filter — a collapsible panel for toggling relationship types on/off.
-		// Shares the same persisted state as the side-panel view. Skipped on mini
-		// embeds (no room) though the filter itself still applies to them.
+		// Type filter — a collapsible panel for toggling relationship types on/off
+		// in THIS graph only; saved as the block's `hide:` line. Skipped on mini
+		// embeds (no room) though a typed `hide:` still applies to them.
 		if (effectiveSize !== "mini") this.addFilterControl(el);
 	}
 
@@ -319,7 +373,19 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		const toggle = wrap.createEl("button", { cls: "relations-filter-toggle" });
 		const panel = wrap.createDiv({ cls: "relations-filter-panel" });
 
-		const activeFilter = this.settings.disabledTypes.length > 0;
+		// Restore open/expanded state if this block was just re-rendered after
+		// saving its own filter.
+		const key = this.uiKey();
+		const remembered = key ? filterUiState.get(key) : undefined;
+		if (remembered) {
+			this.filterOpen = remembered.open;
+			this.filterExpanded = remembered.expanded;
+		}
+		const remember = (): void => {
+			if (key) filterUiState.set(key, { open: this.filterOpen, expanded: this.filterExpanded });
+		};
+
+		const activeFilter = this.hiddenTypes().length > 0;
 		setIcon(toggle, "list-filter");
 		toggle.createSpan({ text: "Filter" });
 		toggle.toggleClass("is-active", this.filterOpen || activeFilter);
@@ -330,19 +396,23 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				panel.empty();
 				return;
 			}
-			renderFilterPanel(panel, this.settings, {
+			// The panel edits `disabledTypes` on the object it's given; hand it
+			// a copy holding this graph's own list so global settings are
+			// never touched.
+			const local = this.viewSettings();
+			renderFilterPanel(panel, local, {
 				expanded: this.filterExpanded,
 				onChange: () => {
-					this.onSettingsChange?.();
-					// Re-render this block so the graph reflects the new filter.
-					this.render();
+					remember();
+					void this.saveHidden([...local.disabledTypes]);
 				},
 			});
 		};
 
 		toggle.addEventListener("click", () => {
 			this.filterOpen = !this.filterOpen;
-			toggle.toggleClass("is-active", this.filterOpen || this.settings.disabledTypes.length > 0);
+			remember();
+			toggle.toggleClass("is-active", this.filterOpen || this.hiddenTypes().length > 0);
 			draw();
 		});
 
@@ -449,10 +519,9 @@ export function processRelationsBlock(
 	cache: GraphCache | null = null,
 	store: PositionStore | null = null,
 	labelStore: EdgeLabelStore | null = null,
-	onSettingsChange: (() => void) | null = null,
 ): void {
 	const options = parseOptions(source);
-	const child = new RelationsBlockChild(el, app, settings, options, ctx, cache, store, labelStore, onSettingsChange);
+	const child = new RelationsBlockChild(el, app, settings, options, source, ctx, cache, store, labelStore);
 	ctx.addChild(child);
 }
 
@@ -480,7 +549,16 @@ export function resolveFamilyMode(parsed: Record<string, unknown>): "graph" | "t
  * string or array. Pure (no Obsidian deps) so it can be unit-tested directly.
  */
 export function resolveGroups(parsed: Record<string, unknown>): string[] | undefined {
-	const rawGroups = parsed["groups"];
+	return resolveList(parsed, "groups");
+}
+
+/** `hide:` — relationship types to hide in this graph (issue #41). Same formats as groups:. */
+export function resolveHide(parsed: Record<string, unknown>): string[] | undefined {
+	return resolveList(parsed, "hide");
+}
+
+function resolveList(parsed: Record<string, unknown>, key: string): string[] | undefined {
+	const rawGroups = parsed[key];
 	let groups: string[] | undefined;
 	if (typeof rawGroups === "string") {
 		groups = rawGroups
@@ -582,8 +660,9 @@ export function parseOptions(source: string): ParsedOptions {
 			: undefined;
 
 	const groups = resolveGroups(parsed);
+	const hide = resolveHide(parsed);
 
-	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, groups, sizeExplicit, depthExplicit };
+	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, groups, hide, sizeExplicit, depthExplicit };
 }
 
 function resolveHostFile(app: App, hostPath: string, sourcePath: string): TFile | null {

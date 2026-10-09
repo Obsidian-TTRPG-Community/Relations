@@ -129,7 +129,44 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | `spacing`     | `1.0` (`0.55` in mini) | family views only: node spacing multiplier. Lower = tighter tree with shorter edges and larger nodes (good for infoboxes); higher = more spread out. Range `0.2`–`3` |
 | `id`          | none                   | a stable identifier for this block. Required to **lock** the layout — see below |
 | `groups`      | none (show everything) | only show some kinds of relationships, e.g. `groups: Social` or `groups: "Social, Family"`. See [Show only some kinds of relationships](#show-only-some-kinds-of-relationships) |
+| `hide`        | none (show everything) | relationship types to hide in this graph, e.g. `hide: parent, spouse`. The graph's **Filter** button writes this line for you. See [Hide some relationships in one graph](#hide-some-relationships-in-one-graph) |
 
+
+### Hide some relationships in one graph
+
+Each graph in a note has its own **Filter** button. Untick a relationship type and it disappears from **that graph only**. Other graphs, in this note or any other, don't change.
+
+Relations remembers what you hid by writing a `hide:` line into the graph's code block:
+
+````markdown
+```relations
+size: small
+hide: parent, spouse
+```
+````
+
+You can type that line yourself too. To show everything again, tick the types back on or delete the `hide:` line.
+
+So two graphs on one character page can show different things:
+
+````markdown
+```relations
+hide: ally, enemy, friend, rival
+```
+
+```relations
+hide: parent, family, spouse
+```
+````
+
+The first one shows family, the second shows everyone else.
+
+**Good to know**
+
+- Big or small letters don't matter: `hide: Parent` works.
+- The side panel (the Relations view in the sidebar) has its own Filter, separate from the graphs in your notes.
+- If you have lots of types, [groups](#show-only-some-kinds-of-relationships) can be quicker: `groups: Family`.
+- Small graphs inside callouts have no Filter button (no room), but a typed `hide:` line still works.
 
 ### Show only some kinds of relationships
 
