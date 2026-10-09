@@ -5,6 +5,7 @@ import {
 	GraphEdge,
 	RelationsSettings,
 	RelationshipType,
+	DisplayNameMap,
 } from "./types";
 import { GraphCache } from "./graph-cache";
 
@@ -34,7 +35,34 @@ export function filterGraphByTypes(
 	const nodes = graph.nodes.filter(
 		(n) => connected.has(n.id) || n.id === keepNodeId,
 	);
-	return { nodes, edges };
+	return withDisplayNames(graph, { nodes, edges });
+}
+
+/**
+ * Carry the perspective display-name map from a source graph onto a subgraph
+ * derived from it. The map is keyed by note path, so entries for notes the
+ * subgraph dropped are simply never looked up — no pruning needed.
+ */
+function withDisplayNames(source: RelationsGraph, sub: RelationsGraph): RelationsGraph {
+	return source.displayNames ? { ...sub, displayNames: source.displayNames } : sub;
+}
+
+/**
+ * The label a node should show when the graph is viewed from `focusId`'s
+ * perspective (issue #14). If the focus note links to this node with an alias
+ * — `ally: "[[Meine Wald|The Enlightened One]]"` — that alias is used; otherwise
+ * the node's own label (its basename). The focus node itself, and every node
+ * when there is no focus (full-vault views), always keep their own label.
+ *
+ * Pure: never mutates the (cached, shared) node.
+ */
+export function perspectiveLabel(
+	graph: RelationsGraph,
+	node: GraphNode,
+	focusId: string | undefined,
+): string {
+	if (!focusId || node.id === focusId) return node.label;
+	return graph.displayNames?.get(focusId)?.get(node.id) ?? node.label;
 }
 
 /**
@@ -56,10 +84,28 @@ export function buildFullGraph(
 	}
 
 	const typeMap = buildTypeMap(settings);
+	// Configured order of relationship types — used as alias precedence.
+	const typeRank = new Map(settings.relationshipTypes.map((t, i) => [t.name, i]));
 	const files = app.vault.getMarkdownFiles().filter((f) => inScope(f, settings));
 
 	const notePaths = new Set<string>();
 	const rawEdges: GraphEdge[] = [];
+	// declaring note → target note → { alias, rank } (see recordAlias below).
+	const aliases = new Map<string, Map<string, { alias: string; rank: number }>>();
+
+	/**
+	 * Record what `source` calls `target`. Deterministic precedence when a note
+	 * aliases the same target differently in several relationship properties:
+	 * the property whose type comes FIRST in the settings type list wins; within
+	 * one property, the first link wins. An unaliased link never clears an alias
+	 * set by another property.
+	 */
+	const recordAlias = (source: string, target: string, alias: string, rank: number): void => {
+		let byTarget = aliases.get(source);
+		if (!byTarget) { byTarget = new Map(); aliases.set(source, byTarget); }
+		const prev = byTarget.get(target);
+		if (!prev || rank < prev.rank) byTarget.set(target, { alias, rank });
+	};
 
 	for (const file of files) {
 		const cache = app.metadataCache.getFileCache(file);
@@ -78,12 +124,17 @@ export function buildFullGraph(
 			const type = typeMap.get(key.toLowerCase());
 			if (!type) continue;
 
-			const targets = extractLinkTargets(fm[key]);
-			for (const target of targets) {
+			const rank = typeRank.get(type.name) ?? Number.MAX_SAFE_INTEGER;
+			for (const { target, alias } of extractLinks(fm[key])) {
 				const resolved = app.metadataCache.getFirstLinkpathDest(target, file.path);
 				if (!resolved) continue;
 				if (resolved.path === file.path) continue;
 				if (!inScope(resolved, settings)) continue;
+
+				// Keyed by the DECLARING note → linked note, before any
+				// declares-child swap below: the alias is this note's name for
+				// the other one, whichever way the stored edge ends up pointing.
+				if (alias) recordAlias(file.path, resolved.path, alias, rank);
 
 				// Genealogy edges are stored child→parent throughout the data
 				// model (matching a `parent: [[X]]` declaration written on the
@@ -142,7 +193,14 @@ export function buildFullGraph(
 		(e) => notePaths.has(e.source) && notePaths.has(e.target),
 	));
 
-	const result = { nodes, edges };
+	const result: RelationsGraph = { nodes, edges };
+	if (aliases.size > 0) {
+		const displayNames = new Map<string, Map<string, string>>();
+		for (const [source, byTarget] of aliases) {
+			displayNames.set(source, new Map([...byTarget].map(([t, v]) => [t, v.alias])));
+		}
+		result.displayNames = displayNames as DisplayNameMap;
+	}
 	if (cache) cache.set(settings, result);
 	return result;
 }
@@ -240,7 +298,7 @@ export function localSubgraph(
 		return Math.min(ds, dt) < depth;
 	});
 
-	return { nodes, edges };
+	return withDisplayNames(full, { nodes, edges });
 }
 
 /**
@@ -277,10 +335,10 @@ export function connectedComponent(
 			queue.push(nb);
 		}
 	}
-	return {
+	return withDisplayNames(graph, {
 		nodes: graph.nodes.filter((n) => visited.has(n.id)),
 		edges: graph.edges.filter((e) => visited.has(e.source) && visited.has(e.target)),
-	};
+	});
 }
 
 /**
@@ -436,7 +494,7 @@ export function filterFamilyNeighborhood(
 		(e) => (e.genealogy || e.pair) && included.has(e.source) && included.has(e.target),
 	);
 
-	return { nodes, edges };
+	return withDisplayNames(full, { nodes, edges });
 }
 
 function buildTypeMap(settings: RelationsSettings): Map<string, RelationshipType> {
@@ -602,10 +660,23 @@ function hasRequiredTag(cache: CachedMetadata, requiredTags: string[]): boolean 
 	});
 }
 
-export function extractLinkTargets(value: unknown): string[] {
+/** One link parsed from a relationship property value. */
+export interface LinkRef {
+	target: string;   // link path, alias and heading stripped — feed to getFirstLinkpathDest
+	alias?: string;   // display text from `[[Target|Alias]]`; wikilinks only
+}
+
+/**
+ * Parse a relationship property value into links. Accepts a single string, a
+ * list, wikilinks (`[[A]]`, `[[A|Alias]]`, `[[A#Heading]]`), comma-separated
+ * values, and plain note names. Aliases are only taken from wikilink syntax —
+ * plain-text values have no alias form (a stray `|` there is still stripped
+ * from the target, as before).
+ */
+export function extractLinks(value: unknown): LinkRef[] {
 	if (value == null) return [];
 	if (Array.isArray(value)) {
-		return value.flatMap((v) => extractLinkTargets(v));
+		return value.flatMap((v) => extractLinks(v));
 	}
 	if (typeof value !== "string") return [];
 
@@ -615,14 +686,31 @@ export function extractLinkTargets(value: unknown): string[] {
 	const wikiRegex = /\[\[([^\]]+)\]\]/g;
 	const matches = [...s.matchAll(wikiRegex)];
 	if (matches.length > 0) {
-		return matches.map((m) => stripAlias(m[1]));
+		return matches.map((m) => {
+			const inner = m[1];
+			const ref: LinkRef = { target: stripAlias(inner) };
+			const pipeIdx = inner.indexOf("|");
+			if (pipeIdx >= 0) {
+				const alias = inner.slice(pipeIdx + 1).trim();
+				if (alias) ref.alias = alias;
+			}
+			return ref;
+		});
 	}
 
 	if (s.includes(",")) {
-		return s.split(",").map((part) => stripAlias(part.trim())).filter(Boolean);
+		return s.split(",")
+			.map((part) => stripAlias(part.trim()))
+			.filter(Boolean)
+			.map((target) => ({ target }));
 	}
 
-	return [stripAlias(s)];
+	return [{ target: stripAlias(s) }];
+}
+
+/** Link targets only — see extractLinks for accepted formats. */
+export function extractLinkTargets(value: unknown): string[] {
+	return extractLinks(value).map((l) => l.target);
 }
 
 export function stripAlias(link: string): string {

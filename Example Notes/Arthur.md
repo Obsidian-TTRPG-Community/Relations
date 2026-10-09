@@ -1,4 +1,3 @@
-[Arthur.md](https://github.com/user-attachments/files/27436165/Arthur.md)
 ---
 npcimage: "[[arthur.svg]]"
 tags:

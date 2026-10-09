@@ -300,7 +300,43 @@ ally:                               # YAML block list
 ally: "[[Bob]], [[Alice]]"          # comma-separated
 ```
 
-Aliases (`[[Bob|Bobby]]`) and headings (`[[Bob#background]]`) are normalised to the file link.
+Headings (`[[Bob#background]]`) still point to the note `Bob`. A nickname after a `|` (`[[Bob|Bobby]]`) also points to `Bob`, and it changes the name shown on the graph. See the next section.
+
+</details>
+
+<details>
+<summary><b>Nicknames</b>: show what each character calls the others (click to expand)</summary>
+
+People don't always use each other's real names. Mordred calls Arthur "Father", not "Arthur". You can show that on the graph.
+
+**How to do it:** inside the link, after the note name, type a `|` and then the nickname.
+
+```yaml
+# Mordred's note
+parent:
+  - "[[Arthur|Father]]"
+  - "[[Morgana|Mother]]"
+```
+
+Now open Mordred's note. On his graph, Arthur's circle says **Father** and Morgana's says **Mother**. The links still go to the right notes.
+
+**Each character keeps their own nicknames.** The graph uses the nicknames of whichever note you are looking at:
+
+| You are looking at… | Arthur's circle says… |
+|---|---|
+| Mordred's note (`[[Arthur\|Father]]`) | **Father** |
+| Kay's note (`[[Arthur\|Little Brother]]`) | **Little Brother** |
+| Guinevere's note (no nickname) | **Arthur** |
+| The whole-vault graph | **Arthur** |
+
+**Good to know**
+
+- Nicknames only change the circles for notes that *your* note links to. Everyone else shows their normal name.
+- The note you're looking at always shows its own real name.
+- The whole-vault graph always shows real names, because it isn't anyone's point of view.
+- The nickname must be inside `[[ ]]`. Writing `Arthur|Father` without the brackets won't work.
+- What if you give someone two different nicknames, like `enemy: "[[Arthur|Tyrant]]"` and `parent: "[[Arthur|Father]]"`? The plugin picks the one whose relationship type is **higher** in your settings list. A link with no nickname never wipes out a nickname.
+- Want to try it? Open **Mordred**, **Kay**, **Lancelot** or **Merlin** in the example notes.
 
 </details>
 

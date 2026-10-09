@@ -48,6 +48,23 @@ tree: true
 - **Foster vs. biological family** — Arthur is `parent: Uther, Igraine` but `family: Kay, Morgana, Ector` to show foster ties
 - **Portraits** load via the `npcimage` frontmatter property pointing to SVGs in `Portraits/`
 
+## Nicknames
+
+Characters can have their own names for each other. Put a `|` and a nickname inside the link:
+
+```yaml
+parent:
+  - "[[Arthur|Father]]"
+```
+
+Open these notes and look at the graph. The same person shows a different name depending on whose note you're on:
+
+- [[Mordred]]: Arthur says **Father**, Morgana says **Mother**
+- [[Kay]]: Arthur says **Little Brother**
+- [[Merlin]]: Arthur says **The Boy King**
+- [[Lancelot]]: Guinevere says **My Lady**
+- [[Arthur]]: no nicknames, so everyone shows their real name
+
 ## Try this
 
 1. Open the **NPC Relationships** view (users icon, left ribbon)

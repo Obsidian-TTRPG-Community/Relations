@@ -171,9 +171,24 @@ export interface GraphEdge {
 	genealogy: boolean;
 }
 
+/**
+ * Perspective display names (issue #14): declaring note path → target note
+ * path → alias text, collected from `[[Target|Alias]]` links in the declaring
+ * note's relationship properties.
+ *
+ * Kept per direction alongside the graph rather than on GraphEdge: dedupeEdges
+ * collapses symmetric edges (and declares-child swaps genealogy direction), so
+ * an alias stored on the edge would lose one side's name for the other.
+ */
+export type DisplayNameMap = ReadonlyMap<string, ReadonlyMap<string, string>>;
+
 export interface RelationsGraph {
 	nodes: GraphNode[];
 	edges: GraphEdge[];
+	// Present only when at least one in-scope relationship link carries an
+	// alias. Never applied to GraphNode.label — the graph is cached and shared,
+	// so perspective labels are resolved at render time (see perspectiveLabel).
+	displayNames?: DisplayNameMap;
 }
 
 export interface SavedPosition {

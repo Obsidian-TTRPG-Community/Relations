@@ -7,7 +7,7 @@ ally:
   - "[[Arthur]]"
   - "[[Gawain]]"
 lover:
-  - "[[Guinevere]]"
+  - "[[Guinevere|My Lady]]"
 family:
   - "[[Galahad]]"
 ---

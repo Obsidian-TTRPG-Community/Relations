@@ -2,7 +2,8 @@ import { App, TFile, Menu } from "obsidian";
 import cytoscape, { Core, ElementDefinition, LayoutOptions } from "cytoscape";
 import fcose from "cytoscape-fcose";
 import dagre from "cytoscape-dagre";
-import { RelationsGraph, RelationsSettings, GraphEdge, RelationshipType, EdgeLabelStore, edgeLabelKey } from "./types";
+import { RelationsGraph, RelationsSettings, GraphEdge, GraphNode, RelationshipType, EdgeLabelStore, edgeLabelKey } from "./types";
+import { perspectiveLabel } from "./graph";
 import { applyGenerationLayout } from "./family-tree";
 import { drawFamilyConnectors, OverlayLabelHooks } from "./family-connectors";
 import { setupNodeBadges } from "./node-badges";
@@ -119,6 +120,7 @@ function measureLabelWidths(
 	host: HTMLElement,
 	graph: RelationsGraph,
 	compact: boolean,
+	labelOf: (n: GraphNode) => string,
 ): Map<string, number> {
 	const result = new Map<string, number>();
 	const fontSize = compact ? 10 : 13;
@@ -133,7 +135,7 @@ function measureLabelWidths(
 
 	try {
 		for (const n of graph.nodes) {
-			probe.textContent = n.label;
+			probe.textContent = labelOf(n);
 			result.set(n.id, Math.max(1, probe.offsetWidth));
 		}
 	} finally {
@@ -222,7 +224,15 @@ export function renderGraph(opts: RenderOptions): Core {
 		return labelStore.getLabel(edgeLabelKey(keySource, e.type, keyTarget, typeIsSymmetric(e))) ?? "";
 	};
 
-	const elements = toCytoscape(effectiveGraph, highlightId, lookupLabel);
+	// Perspective labels (issue #14): when the view is focused on a note, its
+	// own aliases for the notes it links to (`[[Meine Wald|The Enlightened
+	// One]]`) replace their basenames. Resolved here at render time — never
+	// written into the cached graph — and from `graph`, not `effectiveGraph`,
+	// which is rebuilt without the display-name map. Full-vault views have no
+	// highlightId and fall back to basenames.
+	const labelOf = (n: GraphNode): string => perspectiveLabel(graph, n, highlightId);
+
+	const elements = toCytoscape(effectiveGraph, highlightId, lookupLabel, labelOf);
 	const theme = resolveTheme(container);
 
 	// Measure node label widths up-front so layouts can space nodes proportionally
@@ -232,7 +242,7 @@ export function renderGraph(opts: RenderOptions): Core {
 	// treated as the same width. When labels are hidden there's nothing to
 	// measure, so we use an empty map and the layout packs nodes by circle size.
 	const labelWidths = showLabels
-		? measureLabelWidths(container, effectiveGraph, !!compact)
+		? measureLabelWidths(container, effectiveGraph, !!compact, labelOf)
 		: new Map<string, number>();
 	// Stash on node data so the family-graph layout (which reads from the cy instance,
 	// not from `graph`) can access it cheaply via `node.data("labelWidth")`.
@@ -604,12 +614,13 @@ function toCytoscape(
 	graph: RelationsGraph,
 	highlightId?: string,
 	lookupLabel?: (e: GraphEdge) => string,
+	labelOf: (n: GraphNode) => string = (n) => n.label,
 ): ElementDefinition[] {
 	const out: ElementDefinition[] = [];
 	for (const n of graph.nodes) {
 		const data: Record<string, unknown> = {
 			id: n.id,
-			label: n.label,
+			label: labelOf(n),
 			image: n.image ?? "",
 			hasImage: n.image ? "true" : "false",
 			highlight: highlightId && n.id === highlightId ? "true" : "false",

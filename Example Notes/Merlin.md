@@ -4,7 +4,7 @@ tags:
   - npc
   - magic-user
 ally:
-  - "[[Arthur]]"
+  - "[[Arthur|The Boy King]]"
 enemy:
   - "[[Morgana]]"
 lover:
