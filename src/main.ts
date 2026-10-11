@@ -71,7 +71,7 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 					"# family-graph: false # focused family view: parents above, partners level, children below\n" +
 					"# zoom: 1.0           # zoom multiplier; mini defaults to 1.4\n" +
 					"# height: 400px       # override embed height. px, em, rem, vh, vw, %\n" +
-					"# spacing: 1.0        # family-graph node spacing; <1 tighter, >1 looser\n" +
+					"# spacing: 1.0        # node spacing; <1 tighter, >1 looser\n" +
 					"# labels: true        # show note names under nodes\n" +
 					"# id: my-graph        # stable id; required to lock node positions in place\n" +
 					"# hide: parent, spouse  # relationship types to hide in this graph (the Filter button edits this)\n" +

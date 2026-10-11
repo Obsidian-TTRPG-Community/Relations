@@ -641,7 +641,7 @@ export function parseOptions(source: string): ParsedOptions {
 		}
 	}
 
-	// Spacing: family-graph node spacing multiplier. Accept number or string, clamp to 0.2–3.0.
+	// Spacing: node spacing multiplier (every layout). Accept number or string, clamp to 0.2–3.0.
 	let spacing: number | undefined;
 	const rawSpacing = parsed["spacing"];
 	if (typeof rawSpacing === "number" && isFinite(rawSpacing)) {

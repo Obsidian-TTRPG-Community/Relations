@@ -37,7 +37,7 @@ export interface RenderOptions {
 	zoomMultiplier?: number;    // applied AFTER fit; >1 zooms in, <1 zooms out. Default 1.
 	showLabels?: boolean;       // show the note name under each node. Defaults to the
 	                            // showNodeLabels setting; a code-block can override it.
-	spacing?: number;           // family-graph spacing multiplier (0.2–3.0)
+	spacing?: number;           // node spacing multiplier for every layout (0.2–3.0)
 	presetPositions?: Record<string, { x: number; y: number }>;  // locked layout positions
 	labelStore?: EdgeLabelStore | null;
 	                            // When provided, edge labels are loaded from and saved to this
@@ -266,7 +266,7 @@ export function renderGraph(opts: RenderOptions): Core {
 	const hasPresets = !!opts.presetPositions && Object.keys(opts.presetPositions).length > 0;
 	const initialLayout = (familyMode || hasPresets)
 		? ({ name: "preset" } as cytoscape.LayoutOptions)
-		: pickLayout(settings, useTreeLayout, effectiveGraph, !!compact, labelWidths);
+		: pickLayout(settings, useTreeLayout, effectiveGraph, !!compact, labelWidths, opts.spacing ?? 1);
 
 	const cy = cytoscape({
 		container,
@@ -942,7 +942,12 @@ function pickLayout(
 	graph: RelationsGraph,
 	compact: boolean,
 	labelWidths: Map<string, number>,
+	spacing = 1,
 ): LayoutOptions {
+	// User-facing spacing multiplier (`spacing:` in a code block). Scales gaps and
+	// edge lengths linearly; repulsion is an inverse-square force, so it scales
+	// with the square to move nodes apart by roughly the same factor.
+	const sp = Math.max(0.2, Math.min(3, spacing));
 	// Average label width — used as a baseline so fcose's spacing scales with
 	// however verbose this vault's names happen to be. Vaults with short names
 	// (Arthur, Merlin) keep the tight default spacing; vaults with long names
@@ -966,14 +971,21 @@ function pickLayout(
 		return {
 			name: "dagre",
 			rankDir: "TB",
-			nodeSep: Math.round((compact ? 20 : 40) * widthScale),
-			rankSep: compact ? 40 : 80,
+			nodeSep: Math.round((compact ? 20 : 40) * widthScale * sp),
+			rankSep: Math.round((compact ? 40 : 80) * sp),
 			animate,
 		} as unknown as LayoutOptions;
 	}
 
 	if (settings.layout === "cose") {
-		return { name: "cose", animate, padding: compact ? 8 : 30 };
+		// 32 / 2048 are cose's own defaults — only scaled when spacing is set.
+		return {
+			name: "cose",
+			animate,
+			padding: compact ? 8 : 30,
+			idealEdgeLength: () => 32 * sp,
+			nodeRepulsion: () => 2048 * sp * sp,
+		} as unknown as LayoutOptions;
 	}
 
 	// fcose is per-node/per-edge functions, so we can use the actual label widths
@@ -993,7 +1005,7 @@ function pickLayout(
 		nodeRepulsion: (node: cytoscape.NodeSingular): number => {
 			const w = (node.data("labelWidth") as number | undefined) ?? refWidth;
 			const scale = Math.max(1, w / refWidth);
-			return baseRepulsion * scale;
+			return baseRepulsion * scale * sp * sp;
 		},
 		// Ideal edge length: the longer the endpoints' labels, the longer the
 		// edge needs to be to avoid label overlap. We add a fixed fraction of the
@@ -1003,14 +1015,14 @@ function pickLayout(
 			const sourceW = (edge.source().data("labelWidth") as number | undefined) ?? refWidth;
 			const targetW = (edge.target().data("labelWidth") as number | undefined) ?? refWidth;
 			const labelPad = (sourceW + targetW) / 4;  // half of avg label width
-			if (edge.data("pair") === "true") return basePairLen + labelPad * 0.4;
-			return baseEdgeLen + labelPad;
+			if (edge.data("pair") === "true") return (basePairLen + labelPad * 0.4) * sp;
+			return (baseEdgeLen + labelPad) * sp;
 		},
 		edgeElasticity: (edge: cytoscape.EdgeSingular): number => {
 			return edge.data("pair") === "true" ? 0.9 : 0.45;
 		},
 		padding: compact ? 6 : 30,
-		nodeSeparation: Math.round((compact ? 30 : 90) * widthScale),
+		nodeSeparation: Math.round((compact ? 30 : 90) * widthScale * sp),
 	};
 	return fcoseOpts as unknown as LayoutOptions;
 }

@@ -126,7 +126,7 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | `height`      | size default           | override the embed's height. Accepts `px`, `em`, `rem`, `vh`, `vw`, or `%`     |
 | `center`      | host note              | wikilink or path of a different note to focus on, e.g. `"[[King Arthur]]"`     |
 | `labels`      | (inherits setting)     | `true`/`false` to show or hide note names under nodes for this block, overriding the global **Show node labels** setting |
-| `spacing`     | `1.0` (`0.55` in mini) | family views only: node spacing multiplier. Lower = tighter tree with shorter edges and larger nodes (good for infoboxes); higher = more spread out. Range `0.2`–`3` |
+| `spacing`     | `1.0` (`0.55` in mini family views) | node spacing multiplier, for every layout. Higher = more room between nodes so names and lines stay readable in crowded graphs; lower = tighter, with larger nodes once the view fits (good for infoboxes). Range `0.2`–`3` |
 | `id`          | none                   | a stable identifier for this block. Required to **lock** the layout — see below |
 | `groups`      | none (show everything) | only show some kinds of relationships, e.g. `groups: Social` or `groups: "Social, Family"`. See [Show only some kinds of relationships](#show-only-some-kinds-of-relationships) |
 | `hide`        | none (show everything) | relationship types to hide in this graph, e.g. `hide: parent, spouse`. The graph's **Filter** button writes this line for you. See [Hide some relationships in one graph](#hide-some-relationships-in-one-graph) |
@@ -309,6 +309,19 @@ family-tree: true
 scope: full
 ```
 ````
+
+### Giving a crowded graph more room
+
+When a note has many relationships, the names and lines around it can overlap. Add `spacing` above `1` to push the nodes further apart; it works in the normal graph, `tree: true`, and both family views:
+
+````markdown
+```relations
+size: large
+spacing: 2
+```
+````
+
+Try `1.5`–`2` first. The view still zooms to fit everything, so if names get small, raise `height` (e.g. `height: 700px`) as well.
 
 ### Tightening the tree for small embeds
 
