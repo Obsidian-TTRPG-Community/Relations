@@ -315,7 +315,7 @@ export function renderGraph(opts: RenderOptions): Core {
 		});
 		if (missing.length > 0 && familyMode) {
 			const spacing = opts.spacing ?? (compact ? 0.55 : 1);
-			applyGenerationLayout(cy, graph, { spacing });
+			applyGenerationLayout(cy, graph, { spacing, anchorRelations: familyMode === "tree" });
 			cy.nodes().forEach((node) => {
 				const saved = preset[node.id()];
 				if (saved) node.position({ x: saved.x, y: saved.y });
@@ -331,7 +331,7 @@ export function renderGraph(opts: RenderOptions): Core {
 		}
 	} else if (familyMode) {
 		const spacing = opts.spacing ?? (compact ? 0.55 : 1);
-		applyGenerationLayout(cy, graph, { spacing });
+		applyGenerationLayout(cy, graph, { spacing, anchorRelations: familyMode === "tree" });
 	}
 
 	// Tree mode only: replace Cytoscape's bezier genealogy edges with orthogonal
