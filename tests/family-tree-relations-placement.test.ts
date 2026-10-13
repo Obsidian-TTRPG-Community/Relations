@@ -53,8 +53,9 @@ describe("applyGenerationLayout: anchorRelations", () => {
 		applyGenerationLayout(cy, graph, { anchorRelations: true });
 		const pos = positions(cy);
 		const treeMaxX = Math.max(pos["Amalayin"].x, pos["Varinka"].x, pos["Twice"].x);
+		// First note on a row sits exactly on it; later ones fan out a little.
 		expect(pos["Meine"].y).toBe(pos["Varinka"].y);
-		expect(pos["Serion"].y).toBe(pos["Varinka"].y);
+		expect(Math.abs(pos["Serion"].y - pos["Varinka"].y)).toBeLessThan(110);
 		expect(pos["Marta"].y).toBe(pos["Twice"].y);
 		for (const id of ["Meine", "Serion", "Marta"]) {
 			expect(pos[id].x).toBeGreaterThan(treeMaxX);
@@ -75,8 +76,45 @@ describe("applyGenerationLayout: anchorRelations", () => {
 		const cy = buildCy(graph);
 		applyGenerationLayout(cy, graph, { anchorRelations: true });
 		const pos = positions(cy);
-		expect(pos["Kolimot"].y).toBe(pos["Meine"].y);
-		expect(pos["Kolimot"].x).not.toBe(pos["Meine"].x);
+		expect(Math.abs(pos["Kolimot"].y - pos["Varinka"].y)).toBeLessThan(110);
+		expect(pos["Kolimot"].x).toBeGreaterThan(pos["Meine"].x);
+	});
+
+	it("fans stacked notes out so no line to an ally passes behind an earlier one", () => {
+		const graph = familyWithRelations();
+		for (const id of ["Berit", "Luthien", "Lysenna"]) {
+			graph.nodes.push(node(id));
+			graph.edges.push(allyEdge("Twice", id));
+		}
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		const row = ["Marta", "Berit", "Luthien", "Lysenna"].sort((a, b) => pos[a].x - pos[b].x);
+		const A = pos["Twice"];
+		for (let k = 1; k < row.length; k++) {
+			for (let j = 0; j < k; j++) {
+				const B = pos[row[k]];
+				const P = pos[row[j]];
+				const dx = B.x - A.x, dy = B.y - A.y;
+				const tt = Math.max(0, Math.min(1, ((P.x - A.x) * dx + (P.y - A.y) * dy) / (dx * dx + dy * dy)));
+				const dist = Math.hypot(A.x + tt * dx - P.x, A.y + tt * dy - P.y);
+				expect(dist).toBeGreaterThanOrEqual(25);
+			}
+		}
+	});
+
+	it("keeps fanned notes within half a generation of their row", () => {
+		const graph = familyWithRelations();
+		for (const id of ["Berit", "Luthien", "Lysenna"]) {
+			graph.nodes.push(node(id));
+			graph.edges.push(allyEdge("Twice", id));
+		}
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		for (const id of ["Marta", "Berit", "Luthien", "Lysenna"]) {
+			expect(Math.abs(pos[id].y - pos["Twice"].y)).toBeLessThanOrEqual(110);
+		}
 	});
 
 	it("puts a note with no links at all into the fallback area, not on top of anything", () => {

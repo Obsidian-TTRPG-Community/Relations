@@ -646,7 +646,9 @@ export function applyGenerationLayout(
  * Family-tree placement for notes outside the family (allies, enemies,
  * deities...). Each one goes on the row of the note it connects to, in a margin
  * to the right of the whole tree, so its line runs straight across instead of
- * diagonally to a distant corner. Notes on the same row stack side by side.
+ * diagonally to a distant corner. Notes on the same row stack side by side,
+ * nudged above or below the row just enough that the line to a far note
+ * doesn't run behind a nearer one and make the notes look chained together.
  * A note linked only to another outside note follows that note's row once it
  * has one. Notes with no links at all go into a small wrapped grid past the
  * margin.
@@ -685,6 +687,7 @@ function placeRelationsBesideTree(
 	}
 
 	const used = new Map<number, number>();
+	const placed: { id: string; anchor: string; y: number; slot: number }[] = [];
 	let remaining = [...outside];
 	let progressed = true;
 	while (remaining.length > 0 && progressed) {
@@ -699,11 +702,48 @@ function placeRelationsBesideTree(
 			const y = rowOf.get(anchor)!;
 			const slot = used.get(y) ?? 0;
 			used.set(y, slot + 1);
-			cy.getElementById(id).position({ x: marginX + slot * colStep, y });
+			placed.push({ id, anchor, y, slot });
 			rowOf.set(id, y);
 			progressed = true;
 		}
 		remaining = stillWaiting;
+	}
+
+	// Fan out: for each note (nearest first) take the first vertical offset, in
+	// the order 0, up, down, further up..., whose line from the anchor clears
+	// every nearer note. Falls back to the best-clearing offset within the cap.
+	const CLEAR = 32;
+	const step = genHeight * 0.12;
+	const cap = genHeight * 0.48;
+	const candidates: number[] = [0];
+	for (let o = step; o <= cap + 1e-6; o += step) candidates.push(-o, o);
+	const finalPos = new Map<string, { x: number; y: number }>();
+	for (const n of graph.nodes) {
+		if (!outsideSet.has(n.id)) finalPos.set(n.id, cy.getElementById(n.id).position());
+	}
+	const nearer: { x: number; y: number }[] = [];
+	for (const { id, anchor, y, slot } of placed) {
+		const x = marginX + slot * colStep;
+		const a = finalPos.get(anchor) ?? { x, y };
+		const clearance = (cy2: number): number => {
+			const dx = x - a.x, dy = cy2 - a.y, len2 = dx * dx + dy * dy || 1;
+			let best = Infinity;
+			for (const q of nearer) {
+				const tt = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / len2));
+				best = Math.min(best, Math.hypot(a.x + tt * dx - q.x, a.y + tt * dy - q.y));
+			}
+			return best;
+		};
+		let chosen = y;
+		let bestScore = -1;
+		for (const off of candidates) {
+			const score = clearance(y + off);
+			if (score >= CLEAR) { chosen = y + off; break; }
+			if (score > bestScore) { bestScore = score; chosen = y + off; }
+		}
+		cy.getElementById(id).position({ x, y: chosen });
+		finalPos.set(id, { x, y: chosen });
+		nearer.push({ x, y: chosen });
 	}
 
 	if (remaining.length > 0) {
