@@ -285,7 +285,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for connected graph." });
 				return;
 			}
-			graph = buildConnectedGraph(this.app, this.viewSettings(), hostFile.path, this.cache, groups);
+			graph = buildConnectedGraph(this.app, this.viewSettings(), hostFile.path, this.cache, groups, !!this.options.familyMode);
 			// `connected` normally has no hop limit — it walks the whole
 			// component. But an explicitly written `depth:` shouldn't be
 			// silently ignored, and mini embeds always force a compact 1-hop
@@ -311,15 +311,11 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		graph = filterGraphByTypes(graph, new Set(this.hiddenTypes()), highlightId);
 
 		// Node status: Mute applies everywhere (it never removes anything, so it
-		// can never fragment a family tree). Hide is skipped whenever this block
-		// is actually rendering as a family-tree/family-graph view — keyed on
-		// this.options.familyMode directly, not on which function built the
-		// graph, since scope: full/connected explicitly combined with a family
-		// mode routes through the scope==="full"/buildConnectedGraph branches
-		// above rather than buildFamilyNeighborhood, but still renders as a
-		// family view and must still keep dead ancestors visible.
+		// can never fragment a family tree). Hide already ran before the walk for
+		// every scoped view (skipped for family views, which must keep dead
+		// ancestors visible); only `scope: full` has no walk, so it hides here.
 		graph = applyMutedNodes(graph, this.settings.statusRules);
-		if (!this.options.familyMode) {
+		if (this.options.scope === "full" && !this.options.familyMode) {
 			graph = filterGraphByNodeProperties(graph, this.settings.statusRules, highlightId);
 		}
 

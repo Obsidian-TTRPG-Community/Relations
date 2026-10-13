@@ -137,16 +137,25 @@ export function filterGraphByGroups(
  * blocks, a `groups:` filter (issue #16). Walking first and filtering after
  * left notes that were reachable only through a hidden edge on screen as
  * disconnected orphans, kept alive by some other visible edge of their own.
+ *
+ * Node status Hide rules run here too, for the same reason: a note reachable
+ * only through a hidden (e.g. Dead) note must drop out with it. `skipHide` is
+ * for family views, which keep hidden notes so a genealogy chart never loses
+ * an ancestor (Mute still applies to them later).
  */
 function filterBeforeWalk(
 	full: RelationsGraph,
 	settings: RelationsSettings,
 	centerPath: string,
 	groups?: ReadonlySet<string>,
+	skipHide = false,
 ): RelationsGraph {
 	let g = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
 	if (groups && groups.size > 0) {
 		g = filterGraphByGroups(g, groups, centerPath, settings.relationshipTypes);
+	}
+	if (!skipHide) {
+		g = filterGraphByNodeProperties(g, settings.statusRules, centerPath);
 	}
 	return g;
 }
@@ -686,6 +695,7 @@ export function buildConnectedGraph(
 	centerPath: string,
 	cache: GraphCache | null = null,
 	groups?: ReadonlySet<string>,
+	skipHide = false,
 ): RelationsGraph {
 	const full = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
@@ -698,7 +708,7 @@ export function buildConnectedGraph(
 		}
 		return { nodes: [], edges: [] };
 	}
-	const filtered = filterBeforeWalk(full, settings, centerPath, groups);
+	const filtered = filterBeforeWalk(full, settings, centerPath, groups, skipHide);
 	return connectedComponent(filtered, centerPath);
 }
 
@@ -738,7 +748,7 @@ export function buildFamilyNeighborhood(
 		return { nodes: [], edges: [] };
 	}
 
-	const filtered = filterBeforeWalk(full, settings, focusPath, groups);
+	const filtered = filterBeforeWalk(full, settings, focusPath, groups, true);
 	return filterFamilyNeighborhood(filtered, focusPath, depth);
 }
 

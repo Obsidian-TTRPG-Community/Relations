@@ -203,10 +203,12 @@ export class RelationsView extends ItemView {
 		);
 
 		// Node status: the side panel has no family-tree/family-graph mode, so
-		// unlike codeblock.ts there's no exemption to key off — both Mute and
-		// Hide apply unconditionally here.
+		// Mute always applies. Local mode already hid before its walk; the full
+		// graph has no walk, so it hides here.
 		graph = applyMutedNodes(graph, this.plugin.settings.statusRules);
-		graph = filterGraphByNodeProperties(graph, this.plugin.settings.statusRules, highlightId);
+		if (this.mode !== "local") {
+			graph = filterGraphByNodeProperties(graph, this.plugin.settings.statusRules, highlightId);
+		}
 
 		if (this.mode === "local") {
 			const active = this.app.workspace.getActiveFile();
