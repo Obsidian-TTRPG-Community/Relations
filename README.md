@@ -323,6 +323,25 @@ spacing: 2
 
 Try `1.5`–`2` first. The view still zooms to fit everything, so if names get small, raise `height` (e.g. `height: 700px`) as well.
 
+### Keep every relationship type visible with `keep-relationships`
+
+By default, a family view (with or without `scope: full`) shows *only* family: ancestors, descendants, and partners. Add `keep-relationships: true` to keep every other relationship type — allies, enemies, mentors, and any custom type — visible right alongside the family connectors, instead of hiding them.
+
+The flag changes which relationship *types* are drawn, not which notes are reached. To bring in notes outside the family you also need a `scope` wider than the default: `connected` (everyone transitively linked to this note) or `full` (the entire vault). Without it, only relationships between people already in the family view are kept.
+
+````markdown
+```relations
+size: large
+scope: connected
+family-tree: true
+keep-relationships: true
+```
+````
+
+`depth` is optional. Add it (e.g. `depth: 3`) to limit how far a `connected` view reaches. `scope: full` shows every note in the vault, so use it sparingly.
+
+This is opt-in and additive — omitting it reproduces today's exact family-only behaviour, even at `scope: full`. It's meant for the case where a family tree needs to sit inside a bigger web of non-familial relationships (rivalries, alliances, mentorships) without forcing you to flag those types as genealogy just to make them visible — doing that would make them render indistinguishably from real parent-child bonds.
+
 ### Tightening the tree for small embeds
 
 In a narrow space — an infobox, a callout, a `mini` embed — the default spacing can leave nodes looking small and far apart, because the view zooms out to fit the whole tree. `mini` embeds already use tighter spacing automatically, but you can tune any family embed with `spacing`:

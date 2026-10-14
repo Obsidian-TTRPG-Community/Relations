@@ -1,0 +1,189 @@
+import { describe, it, expect } from "vitest";
+import cytoscape from "cytoscape";
+import { applyGenerationLayout } from "../src/family-tree";
+import type { RelationsGraph, GraphEdge, GraphNode } from "../src/types";
+
+function node(id: string): GraphNode {
+	return { id, label: id, tags: [], image: null };
+}
+
+function genealogyEdge(child: string, parent: string): GraphEdge {
+	return { source: child, target: parent, type: "parent", color: "#b45309", symmetric: false, pair: false, lineStyle: "solid", genealogy: true };
+}
+
+function allyEdge(a: string, b: string): GraphEdge {
+	return { source: a, target: b, type: "ally", color: "#22c55e", symmetric: true, pair: false, lineStyle: "solid", genealogy: false };
+}
+
+function buildCy(graph: RelationsGraph): cytoscape.Core {
+	const elements: cytoscape.ElementDefinition[] = [];
+	for (const n of graph.nodes) elements.push({ data: { id: n.id, label: n.label } });
+	for (const e of graph.edges) {
+		elements.push({ data: { id: `${e.source}__${e.type}__${e.target}`, source: e.source, target: e.target } });
+	}
+	return cytoscape({ elements, headless: true });
+}
+
+function positions(cy: cytoscape.Core): Record<string, { x: number; y: number }> {
+	const out: Record<string, { x: number; y: number }> = {};
+	cy.nodes().forEach((n) => { out[n.id()] = { ...n.position() }; });
+	return out;
+}
+
+// Varinka (child of Amalayin) has a child Twice. Meine and Serion are allies of
+// Varinka; Marta is an ally of Twice; Kolimot is linked only to Meine.
+function familyWithRelations(): RelationsGraph {
+	return {
+		nodes: ["Amalayin", "Varinka", "Twice", "Meine", "Serion", "Marta", "Kolimot"].map(node),
+		edges: [
+			genealogyEdge("Varinka", "Amalayin"),
+			genealogyEdge("Twice", "Varinka"),
+			allyEdge("Varinka", "Meine"),
+			allyEdge("Varinka", "Serion"),
+			allyEdge("Twice", "Marta"),
+			allyEdge("Meine", "Kolimot"),
+		],
+	};
+}
+
+describe("applyGenerationLayout: anchorRelations", () => {
+	it("puts a non-family note on its anchor's row, to the right of the whole tree", () => {
+		const graph = familyWithRelations();
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		const treeMaxX = Math.max(pos["Amalayin"].x, pos["Varinka"].x, pos["Twice"].x);
+		// First note on a row sits exactly on it; later ones fan out a little.
+		expect(pos["Meine"].y).toBe(pos["Varinka"].y);
+		expect(Math.abs(pos["Serion"].y - pos["Varinka"].y)).toBeLessThan(110);
+		expect(pos["Marta"].y).toBe(pos["Twice"].y);
+		for (const id of ["Meine", "Serion", "Marta"]) {
+			expect(pos[id].x).toBeGreaterThan(treeMaxX);
+		}
+	});
+
+	it("stacks several notes on one row side by side without overlapping", () => {
+		const graph = familyWithRelations();
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		expect(pos["Meine"].x).not.toBe(pos["Serion"].x);
+		expect(Math.abs(pos["Meine"].x - pos["Serion"].x)).toBeGreaterThanOrEqual(100);
+	});
+
+	it("places a note linked only to another non-family note on that note's row", () => {
+		const graph = familyWithRelations();
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		expect(Math.abs(pos["Kolimot"].y - pos["Varinka"].y)).toBeLessThan(110);
+		expect(pos["Kolimot"].x).toBeGreaterThan(pos["Meine"].x);
+	});
+
+	it("fans stacked notes out so no line to an ally passes behind an earlier one", () => {
+		const graph = familyWithRelations();
+		for (const id of ["Berit", "Luthien", "Lysenna"]) {
+			graph.nodes.push(node(id));
+			graph.edges.push(allyEdge("Twice", id));
+		}
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		const row = ["Marta", "Berit", "Luthien", "Lysenna"].sort((a, b) => pos[a].x - pos[b].x);
+		const A = pos["Twice"];
+		for (let k = 1; k < row.length; k++) {
+			for (let j = 0; j < k; j++) {
+				const B = pos[row[k]];
+				const P = pos[row[j]];
+				const dx = B.x - A.x, dy = B.y - A.y;
+				const tt = Math.max(0, Math.min(1, ((P.x - A.x) * dx + (P.y - A.y) * dy) / (dx * dx + dy * dy)));
+				const dist = Math.hypot(A.x + tt * dx - P.x, A.y + tt * dy - P.y);
+				expect(dist).toBeGreaterThanOrEqual(25);
+			}
+		}
+	});
+
+	it("keeps fanned notes within half a generation of their row", () => {
+		const graph = familyWithRelations();
+		for (const id of ["Berit", "Luthien", "Lysenna"]) {
+			graph.nodes.push(node(id));
+			graph.edges.push(allyEdge("Twice", id));
+		}
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		for (const id of ["Marta", "Berit", "Luthien", "Lysenna"]) {
+			expect(Math.abs(pos[id].y - pos["Twice"].y)).toBeLessThanOrEqual(110);
+		}
+	});
+
+	it("keeps every link clear of unrelated notes when the allies also link to each other", () => {
+		const orders = [
+			["Serion", "Enlightened", "Garath"],
+			["Garath", "Enlightened", "Serion"],
+			["Enlightened", "Garath", "Serion"],
+			["Garath", "Serion", "Enlightened"],
+		];
+		for (const order of orders) {
+		const graph: RelationsGraph = {
+			nodes: ["Amalayin", "Varinka", "Twice", ...order].map(node),
+			edges: [
+				genealogyEdge("Varinka", "Amalayin"),
+				genealogyEdge("Twice", "Varinka"),
+				// Links between the allies come first, so a note's first neighbour
+				// is another outside note, not the family member.
+				allyEdge("Serion", "Garath"),
+				allyEdge("Enlightened", "Garath"),
+				allyEdge("Enlightened", "Serion"),
+				...order.map((id) => allyEdge("Varinka", id)),
+			],
+		};
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		for (const e of graph.edges) {
+			if (e.genealogy) continue;
+			const A = pos[e.source], B = pos[e.target];
+			for (const n of graph.nodes) {
+				if (n.id === e.source || n.id === e.target) continue;
+				const P = pos[n.id];
+				const dx = B.x - A.x, dy = B.y - A.y;
+				const tt = Math.max(0, Math.min(1, ((P.x - A.x) * dx + (P.y - A.y) * dy) / (dx * dx + dy * dy || 1)));
+				const dist = Math.hypot(A.x + tt * dx - P.x, A.y + tt * dy - P.y);
+				expect(dist, `[${order.join(",")}] ${e.source}-${e.target} passes ${n.id}`).toBeGreaterThanOrEqual(25);
+			}
+		}
+		}
+	});
+
+	it("puts a note with no links at all into the fallback area, not on top of anything", () => {
+		const graph = familyWithRelations();
+		graph.nodes.push(node("Loner"));
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		const others = Object.entries(pos).filter(([id]) => id !== "Loner");
+		for (const [, p] of others) {
+			expect(Math.hypot(p.x - pos["Loner"].x, p.y - pos["Loner"].y)).toBeGreaterThan(60);
+		}
+	});
+
+	it("leaves the family nodes where they were without the option", () => {
+		const graph = familyWithRelations();
+		const a = buildCy(graph);
+		const b = buildCy(graph);
+		applyGenerationLayout(a, graph, { anchorRelations: true });
+		applyGenerationLayout(b, graph);
+		const pa = positions(a);
+		const pb = positions(b);
+		for (const id of ["Amalayin", "Varinka", "Twice"]) expect(pa[id]).toEqual(pb[id]);
+	});
+
+	it("without the option, non-family notes keep the old single row at y = 0", () => {
+		const graph = familyWithRelations();
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph);
+		const pos = positions(cy);
+		for (const id of ["Meine", "Serion", "Marta", "Kolimot"]) expect(pos[id].y).toBe(0);
+	});
+});

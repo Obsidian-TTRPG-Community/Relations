@@ -68,7 +68,7 @@ const NODE_NOMINAL_WIDTH = 140; // a typical labeled-portrait's footprint
 export function applyGenerationLayout(
 	cy: Core,
 	graph: RelationsGraph,
-	opts: { spacing?: number } = {},
+	opts: { spacing?: number; anchorRelations?: boolean } = {},
 ): void {
 	const sp = Math.max(0.2, Math.min(3, opts.spacing ?? 1));
 	const genHeight = GEN_HEIGHT * sp;
@@ -623,12 +623,17 @@ export function applyGenerationLayout(
 
 	// 11. Place any orphan nodes (no genealogy edges, no pair edges) off to one
 	//     side so they're visible but don't crowd the tree.
-	let orphanCursor = cursor + cousinGap;
-	for (const node of graph.nodes) {
-		const inFamily = parentsOf.has(node.id) || downstreamUnitsByParent.has(node.id) || pairsOf.has(node.id);
-		if (!inFamily) {
-			cy.getElementById(node.id).position({ x: orphanCursor, y: 0 });
-			orphanCursor += nodeWidth + cousinGap;
+	const isFamilyNode = (id: string): boolean =>
+		parentsOf.has(id) || downstreamUnitsByParent.has(id) || pairsOf.has(id);
+	if (opts.anchorRelations) {
+		placeRelationsBesideTree(cy, graph, isFamilyNode, nodeWidth, cousinGap, genHeight);
+	} else {
+		let orphanCursor = cursor + cousinGap;
+		for (const node of graph.nodes) {
+			if (!isFamilyNode(node.id)) {
+				cy.getElementById(node.id).position({ x: orphanCursor, y: 0 });
+				orphanCursor += nodeWidth + cousinGap;
+			}
 		}
 	}
 
@@ -636,6 +641,138 @@ export function applyGenerationLayout(
 
 
 /* ------------------------------ helpers ------------------------------ */
+
+/**
+ * Family-tree placement for notes outside the family (allies, enemies,
+ * deities...). Each one goes on the row of the note it connects to, in a margin
+ * to the right of the whole tree, so its line runs straight across instead of
+ * diagonally to a distant corner. Notes on the same row stack side by side,
+ * nudged above or below the row just enough that the line to a far note
+ * doesn't run behind a nearer one and make the notes look chained together.
+ * A note linked only to another outside note follows that note's row once it
+ * has one. Notes with no links at all go into a small wrapped grid past the
+ * margin.
+ */
+function placeRelationsBesideTree(
+	cy: Core,
+	graph: RelationsGraph,
+	isFamilyNode: (id: string) => boolean,
+	nodeWidth: number,
+	cousinGap: number,
+	genHeight: number,
+): void {
+	const outside = graph.nodes.map((n) => n.id).filter((id) => !isFamilyNode(id));
+	if (outside.length === 0) return;
+	const outsideSet = new Set(outside);
+
+	const familyXs: number[] = [];
+	const familyYs: number[] = [];
+	const rowOf = new Map<string, number>();
+	for (const n of graph.nodes) {
+		if (outsideSet.has(n.id)) continue;
+		const p = cy.getElementById(n.id).position();
+		familyXs.push(p.x);
+		familyYs.push(p.y);
+		rowOf.set(n.id, p.y);
+	}
+	const colStep = nodeWidth + cousinGap;
+	const marginX = (familyXs.length ? Math.max(...familyXs) : 0) + nodeWidth + cousinGap;
+
+	// Non-family, non-pair links between any two notes.
+	const neighbours = new Map<string, string[]>();
+	for (const e of graph.edges) {
+		if (e.genealogy || e.pair) continue;
+		pushTo(neighbours, e.source, e.target);
+		pushTo(neighbours, e.target, e.source);
+	}
+
+	const used = new Map<number, number>();
+	const placed: { id: string; y: number; slot: number }[] = [];
+	let remaining = [...outside];
+	let progressed = true;
+	while (remaining.length > 0 && progressed) {
+		progressed = false;
+		const stillWaiting: string[] = [];
+		for (const id of remaining) {
+			const anchor = (neighbours.get(id) ?? []).find((n) => rowOf.has(n));
+			if (anchor === undefined) {
+				stillWaiting.push(id);
+				continue;
+			}
+			const y = rowOf.get(anchor)!;
+			const slot = used.get(y) ?? 0;
+			used.set(y, slot + 1);
+			placed.push({ id, y, slot });
+			rowOf.set(id, y);
+			progressed = true;
+		}
+		remaining = stillWaiting;
+	}
+
+	// Fan out: for each note (nearest first) take the first vertical offset, in
+	// the order 0, up, down, further up..., where none of its links to
+	// already-placed notes runs through another note and it doesn't sit on a link
+	// already drawn. Falls back to the best-clearing offset within the cap.
+	const CLEAR = 32;
+	const step = genHeight * 0.12;
+	const cap = genHeight * 0.48;
+	const candidates: number[] = [0];
+	for (let o = step; o <= cap + 1e-6; o += step) candidates.push(-o, o);
+	const finalPos = new Map<string, { x: number; y: number }>();
+	for (const n of graph.nodes) {
+		if (!outsideSet.has(n.id)) finalPos.set(n.id, { ...cy.getElementById(n.id).position() });
+	}
+	const links = graph.edges.filter((e) => !e.genealogy && !e.pair);
+	const segDist = (q: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number => {
+		const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy || 1;
+		const tt = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / len2));
+		return Math.hypot(a.x + tt * dx - q.x, a.y + tt * dy - q.y);
+	};
+	for (const { id, y, slot } of placed) {
+		const x = marginX + slot * colStep;
+		const placedNeighbours = (neighbours.get(id) ?? []).filter((nb) => finalPos.has(nb));
+		const clearance = (candY: number): number => {
+			const me = { x, y: candY };
+			let best = Infinity;
+			// This note's links to already-placed notes must not pass through others.
+			for (const nb of placedNeighbours) {
+				for (const [qid, q] of finalPos) {
+					if (qid === nb) continue;
+					best = Math.min(best, segDist(q, me, finalPos.get(nb)!));
+				}
+			}
+			// This note must not sit on a link that's already drawn.
+			for (const e of links) {
+				const u = finalPos.get(e.source), v = finalPos.get(e.target);
+				if (!u || !v) continue;
+				best = Math.min(best, segDist(me, u, v));
+			}
+			return best;
+		};
+		let chosen = y;
+		let bestScore = -1;
+		for (const off of candidates) {
+			const score = clearance(y + off);
+			if (score >= CLEAR) { chosen = y + off; break; }
+			if (score > bestScore) { bestScore = score; chosen = y + off; }
+		}
+		cy.getElementById(id).position({ x, y: chosen });
+		finalPos.set(id, { x, y: chosen });
+	}
+
+	if (remaining.length > 0) {
+		const widest = used.size > 0 ? Math.max(...used.values()) : 0;
+		const startX = marginX + (widest > 0 ? widest + 1 : 0) * colStep;
+		const startY = familyYs.length ? Math.min(...familyYs) : 0;
+		const cols = Math.max(1, Math.ceil(Math.sqrt(remaining.length)));
+		remaining.forEach((id, i) => {
+			cy.getElementById(id).position({
+				x: startX + (i % cols) * colStep,
+				y: startY + Math.floor(i / cols) * genHeight * 0.6,
+			});
+		});
+	}
+}
 
 function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
 	if (!m.has(k)) m.set(k, []);

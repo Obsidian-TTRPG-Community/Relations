@@ -32,6 +32,10 @@ export interface RenderOptions {
 	                            //   parent→child arrowed) — the original graph-style view.
 	                            // "tree": orthogonal SVG connectors (vertical drops +
 	                            //   sibling distribution bars) for a true family-tree look.
+	keepRelationships?: boolean; // Only meaningful when familyMode is set. By default,
+	                            // family modes filter the graph down to genealogy + pair
+	                            // edges only. Setting this keeps every relationship type
+	                            // visible alongside the family layout/connectors.
 	interactive?: boolean;
 	compact?: boolean;
 	zoomMultiplier?: number;    // applied AFTER fit; >1 zooms in, <1 zooms out. Default 1.
@@ -147,7 +151,7 @@ function measureLabelWidths(
 
 export function renderGraph(opts: RenderOptions): Core {
 	ensureExtensions();
-	const { app, settings, container, graph, highlightId, useTreeLayout, compact, familyMode } = opts;
+	const { app, settings, container, graph, highlightId, useTreeLayout, compact, familyMode, keepRelationships } = opts;
 	// Label visibility: explicit per-call override wins, else fall back to the
 	// global setting (default true for back-compat with vaults predating this option).
 	const showLabels = opts.showLabels ?? settings.showNodeLabels ?? true;
@@ -170,6 +174,14 @@ export function renderGraph(opts: RenderOptions): Core {
 	//   line between them makes it instantly visible. Both family modes filter and
 	//   synthesize identically; they differ only in how connectors are drawn.
 	//
+	//   `keepRelationships` opts out of the genealogy+pair filter (every
+	//   relationship type stays visible alongside the family layout/connectors)
+	//   while keeping the synthesis step. Since real edges between co-parents
+	//   are no longer filtered out in this mode, synthesis must also treat any
+	//   edge between two co-parents (not just a `pair`-flagged one) as "already
+	//   declared" — otherwise a visible edge (e.g. an `ally` line) would get a
+	//   duplicate dotted "informal partnership" line drawn on top of it.
+	//
 	// Other modes: pass the graph through unchanged.
 	// Genealogy edges in our data go child→parent — the child's note declares
 	// its parents in frontmatter, and the data model mirrors that direction.
@@ -186,13 +198,14 @@ export function renderGraph(opts: RenderOptions): Core {
 
 	let effectiveGraph: RelationsGraph;
 	if (familyMode) {
-		const filteredRaw = graph.edges.filter((e) => e.genealogy || e.pair);
-		const filtered: GraphEdge[] = filteredRaw.map(invertGenealogy);
+		const filtered: GraphEdge[] = keepRelationships
+			? graph.edges.map(invertGenealogy)
+			: graph.edges.filter((e) => e.genealogy || e.pair).map(invertGenealogy);
 
 		// Synthesize "informal partnership" edges between co-parents with no
 		// declared pair edge. Extracted so the legend builder can detect the same
 		// condition without duplicating the logic (see synthesizeInformalPartnerships).
-		const synthesized = synthesizeInformalPartnerships(graph);
+		const synthesized = synthesizeInformalPartnerships(graph, keepRelationships);
 		effectiveGraph = { nodes: graph.nodes, edges: [...filtered, ...synthesized] };
 	} else {
 		// Non-family modes: keep all edges (allies, enemies, etc.), but still
@@ -302,7 +315,7 @@ export function renderGraph(opts: RenderOptions): Core {
 		});
 		if (missing.length > 0 && familyMode) {
 			const spacing = opts.spacing ?? (compact ? 0.55 : 1);
-			applyGenerationLayout(cy, graph, { spacing });
+			applyGenerationLayout(cy, graph, { spacing, anchorRelations: true });
 			cy.nodes().forEach((node) => {
 				const saved = preset[node.id()];
 				if (saved) node.position({ x: saved.x, y: saved.y });
@@ -318,7 +331,7 @@ export function renderGraph(opts: RenderOptions): Core {
 		}
 	} else if (familyMode) {
 		const spacing = opts.spacing ?? (compact ? 0.55 : 1);
-		applyGenerationLayout(cy, graph, { spacing });
+		applyGenerationLayout(cy, graph, { spacing, anchorRelations: true });
 	}
 
 	// Tree mode only: replace Cytoscape's bezier genealogy edges with orthogonal
@@ -1066,8 +1079,17 @@ export const INFORMAL_PARTNERSHIP_LEGEND: RelationshipType = {
  * edges) who have no declared pair edge between them. Operates on the raw graph; safe
  * to call independently of rendering (the legend builder uses it to decide whether to
  * show the informal-partnership entry).
+ *
+ * `treatAnyEdgeAsDeclared`, when true, counts ANY edge between two co-parents (not just
+ * a `pair`-flagged one) as "already declared" and skips synthesis for that pair. Needed
+ * by `keepRelationships` mode: once non-pair edges (e.g. `ally`) are no longer filtered
+ * out of the rendered graph, a visible edge between two co-parents would otherwise get a
+ * duplicate dotted "informal partnership" line drawn on top of it.
  */
-export function synthesizeInformalPartnerships(graph: RelationsGraph): GraphEdge[] {
+export function synthesizeInformalPartnerships(
+	graph: RelationsGraph,
+	treatAnyEdgeAsDeclared = false,
+): GraphEdge[] {
 	// Group parents by child. Raw genealogy edges run child→parent (source=child).
 	const parentsByChild = new Map<string, string[]>();
 	for (const e of graph.edges) {
@@ -1077,7 +1099,8 @@ export function synthesizeInformalPartnerships(graph: RelationsGraph): GraphEdge
 	}
 	const declaredPairs = new Set<string>();
 	for (const e of graph.edges) {
-		if (!e.pair) continue;
+		const countsAsDeclared = e.pair || (treatAnyEdgeAsDeclared && !e.genealogy);
+		if (!countsAsDeclared) continue;
 		declaredPairs.add(pairKey(e.source, e.target));
 	}
 	const synthesized: GraphEdge[] = [];
