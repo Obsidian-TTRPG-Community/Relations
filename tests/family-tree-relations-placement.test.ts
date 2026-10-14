@@ -117,6 +117,45 @@ describe("applyGenerationLayout: anchorRelations", () => {
 		}
 	});
 
+	it("keeps every link clear of unrelated notes when the allies also link to each other", () => {
+		const orders = [
+			["Serion", "Enlightened", "Garath"],
+			["Garath", "Enlightened", "Serion"],
+			["Enlightened", "Garath", "Serion"],
+			["Garath", "Serion", "Enlightened"],
+		];
+		for (const order of orders) {
+		const graph: RelationsGraph = {
+			nodes: ["Amalayin", "Varinka", "Twice", ...order].map(node),
+			edges: [
+				genealogyEdge("Varinka", "Amalayin"),
+				genealogyEdge("Twice", "Varinka"),
+				// Links between the allies come first, so a note's first neighbour
+				// is another outside note, not the family member.
+				allyEdge("Serion", "Garath"),
+				allyEdge("Enlightened", "Garath"),
+				allyEdge("Enlightened", "Serion"),
+				...order.map((id) => allyEdge("Varinka", id)),
+			],
+		};
+		const cy = buildCy(graph);
+		applyGenerationLayout(cy, graph, { anchorRelations: true });
+		const pos = positions(cy);
+		for (const e of graph.edges) {
+			if (e.genealogy) continue;
+			const A = pos[e.source], B = pos[e.target];
+			for (const n of graph.nodes) {
+				if (n.id === e.source || n.id === e.target) continue;
+				const P = pos[n.id];
+				const dx = B.x - A.x, dy = B.y - A.y;
+				const tt = Math.max(0, Math.min(1, ((P.x - A.x) * dx + (P.y - A.y) * dy) / (dx * dx + dy * dy || 1)));
+				const dist = Math.hypot(A.x + tt * dx - P.x, A.y + tt * dy - P.y);
+				expect(dist, `[${order.join(",")}] ${e.source}-${e.target} passes ${n.id}`).toBeGreaterThanOrEqual(25);
+			}
+		}
+		}
+	});
+
 	it("puts a note with no links at all into the fallback area, not on top of anything", () => {
 		const graph = familyWithRelations();
 		graph.nodes.push(node("Loner"));

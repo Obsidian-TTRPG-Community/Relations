@@ -687,7 +687,7 @@ function placeRelationsBesideTree(
 	}
 
 	const used = new Map<number, number>();
-	const placed: { id: string; anchor: string; y: number; slot: number }[] = [];
+	const placed: { id: string; y: number; slot: number }[] = [];
 	let remaining = [...outside];
 	let progressed = true;
 	while (remaining.length > 0 && progressed) {
@@ -702,7 +702,7 @@ function placeRelationsBesideTree(
 			const y = rowOf.get(anchor)!;
 			const slot = used.get(y) ?? 0;
 			used.set(y, slot + 1);
-			placed.push({ id, anchor, y, slot });
+			placed.push({ id, y, slot });
 			rowOf.set(id, y);
 			progressed = true;
 		}
@@ -710,8 +710,9 @@ function placeRelationsBesideTree(
 	}
 
 	// Fan out: for each note (nearest first) take the first vertical offset, in
-	// the order 0, up, down, further up..., whose line from the anchor clears
-	// every nearer note. Falls back to the best-clearing offset within the cap.
+	// the order 0, up, down, further up..., where none of its links to
+	// already-placed notes runs through another note and it doesn't sit on a link
+	// already drawn. Falls back to the best-clearing offset within the cap.
 	const CLEAR = 32;
 	const step = genHeight * 0.12;
 	const cap = genHeight * 0.48;
@@ -719,18 +720,32 @@ function placeRelationsBesideTree(
 	for (let o = step; o <= cap + 1e-6; o += step) candidates.push(-o, o);
 	const finalPos = new Map<string, { x: number; y: number }>();
 	for (const n of graph.nodes) {
-		if (!outsideSet.has(n.id)) finalPos.set(n.id, cy.getElementById(n.id).position());
+		if (!outsideSet.has(n.id)) finalPos.set(n.id, { ...cy.getElementById(n.id).position() });
 	}
-	const nearer: { x: number; y: number }[] = [];
-	for (const { id, anchor, y, slot } of placed) {
+	const links = graph.edges.filter((e) => !e.genealogy && !e.pair);
+	const segDist = (q: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number => {
+		const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy || 1;
+		const tt = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / len2));
+		return Math.hypot(a.x + tt * dx - q.x, a.y + tt * dy - q.y);
+	};
+	for (const { id, y, slot } of placed) {
 		const x = marginX + slot * colStep;
-		const a = finalPos.get(anchor) ?? { x, y };
-		const clearance = (cy2: number): number => {
-			const dx = x - a.x, dy = cy2 - a.y, len2 = dx * dx + dy * dy || 1;
+		const placedNeighbours = (neighbours.get(id) ?? []).filter((nb) => finalPos.has(nb));
+		const clearance = (candY: number): number => {
+			const me = { x, y: candY };
 			let best = Infinity;
-			for (const q of nearer) {
-				const tt = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / len2));
-				best = Math.min(best, Math.hypot(a.x + tt * dx - q.x, a.y + tt * dy - q.y));
+			// This note's links to already-placed notes must not pass through others.
+			for (const nb of placedNeighbours) {
+				for (const [qid, q] of finalPos) {
+					if (qid === nb) continue;
+					best = Math.min(best, segDist(q, me, finalPos.get(nb)!));
+				}
+			}
+			// This note must not sit on a link that's already drawn.
+			for (const e of links) {
+				const u = finalPos.get(e.source), v = finalPos.get(e.target);
+				if (!u || !v) continue;
+				best = Math.min(best, segDist(me, u, v));
 			}
 			return best;
 		};
@@ -743,7 +758,6 @@ function placeRelationsBesideTree(
 		}
 		cy.getElementById(id).position({ x, y: chosen });
 		finalPos.set(id, { x, y: chosen });
-		nearer.push({ x, y: chosen });
 	}
 
 	if (remaining.length > 0) {
