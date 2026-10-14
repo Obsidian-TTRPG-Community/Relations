@@ -3,8 +3,8 @@ import { Core } from "cytoscape";
 import type RelationsPlugin from "./main";
 import { VIEW_TYPE_RELATIONS, GraphMode, RelationsGraph } from "./types";
 import { renderGraph } from "./render";
-import { buildFullGraph, buildLocalGraph, filterGraphByTypes } from "./graph";
-import { renderLegend } from "./codeblock";
+import { buildFullGraph, buildLocalGraph, filterGraphByTypes, applyMutedNodes, filterGraphByNodeProperties, mutedLegendEntries } from "./graph";
+import { renderLegend, renderMuteLegend } from "./codeblock";
 import { renderFilterPanel } from "./filter-panel";
 
 export class RelationsView extends ItemView {
@@ -202,6 +202,14 @@ export class RelationsView extends ItemView {
 			highlightId,
 		);
 
+		// Node status: the side panel has no family-tree/family-graph mode, so
+		// Mute always applies. Local mode already hid before its walk; the full
+		// graph has no walk, so it hides here.
+		graph = applyMutedNodes(graph, this.plugin.settings.statusRules);
+		if (this.mode !== "local") {
+			graph = filterGraphByNodeProperties(graph, this.plugin.settings.statusRules, highlightId);
+		}
+
 		if (this.mode === "local") {
 			const active = this.app.workspace.getActiveFile();
 			this.setSubtitle(`Showing ${graph.nodes.length} node${graph.nodes.length === 1 ? "" : "s"} within ${this.currentLocalDepth} hop${this.currentLocalDepth === 1 ? "" : "s"} of ${active?.basename ?? ""}`);
@@ -216,7 +224,7 @@ export class RelationsView extends ItemView {
 			this.showEmpty(this.mode === "local"
 				? "This note isn't connected, or has no relationships within the chosen depth."
 				: "No relationships found yet. Add a relationship property (like `ally:` or `family:`) to a note's frontmatter pointing to another note.");
-			this.renderLegend();
+			this.renderLegend(graph);
 			return;
 		}
 
@@ -234,7 +242,7 @@ export class RelationsView extends ItemView {
 			editableLabels: true,
 		});
 
-		this.renderLegend();
+		this.renderLegend(graph);
 	}
 
 	private showEmpty(message: string): void {
@@ -249,7 +257,7 @@ export class RelationsView extends ItemView {
 		if (this.subtitleEl) this.subtitleEl.setText(text);
 	}
 
-	private renderLegend(): void {
+	private renderLegend(graph: RelationsGraph): void {
 		if (!this.legendEl) return;
 		this.legendEl.toggleClass("is-hidden", !this.plugin.settings.showLegend);
 		if (!this.plugin.settings.showLegend) {
@@ -258,6 +266,9 @@ export class RelationsView extends ItemView {
 		}
 		// `clear: true` so re-renders (after settings change) don't accumulate items.
 		renderLegend(this.legendEl, this.plugin.settings.relationshipTypes, true);
+		// Mute-color swatches only show up when a muted node bearing that color
+		// is actually present in the graph currently on screen.
+		renderMuteLegend(this.legendEl, mutedLegendEntries(graph, this.plugin.settings.statusRules));
 	}
 }
 

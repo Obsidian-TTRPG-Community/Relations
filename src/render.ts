@@ -673,6 +673,13 @@ function toCytoscape(
 		if (n.bottomLeftIcon || n.bottomRightIcon) data.hasBottomBadge = "true";
 		if (n.subtext) data.subtext = n.subtext;
 		if (n.missing) data.missing = "true";
+		// Node status Mute: opacity fade + optional color wash under the portrait.
+		// Presence-tested like ringColor above — only set when a Mute rule
+		// actually matched, so `node[muted = 'true']` cleanly excludes everyone else.
+		if (n.muted) {
+			data.muted = "true";
+			if (n.mutedColor) data.mutedColor = n.mutedColor;
+		}
 		out.push({ data });
 	}
 	for (const e of graph.edges) {
@@ -825,6 +832,37 @@ function buildStyle(theme: ThemeColors, compact: boolean, showLabels: boolean): 
 			style: {
 				"border-color": "data(ringColor)",
 				"border-width": 6,
+			},
+		},
+		// Node status Mute: a whole-node opacity fade, applied on top of whatever
+		// ring-color/highlight/selection rules already matched (those only set
+		// border-*/width/height, not opacity, so there's no conflict). Selected
+		// gets a lighter fade than unselected, same 0.5 -> 0.8 pattern used
+		// elsewhere in this stylesheet for "de-emphasized but still findable."
+		{
+			selector: "node[muted = 'true']",
+			style: {
+				"opacity": 0.5,
+			},
+		},
+		{
+			selector: "node[muted = 'true']:selected",
+			style: {
+				"opacity": 0.8,
+			},
+		},
+		// Per-rule mute color: a tinted wash layered UNDER the portrait rather than
+		// replacing it. Cytoscape.js has no CSS-filter-style grayscale() for
+		// background images, so real desaturation would need per-node canvas
+		// pixel manipulation — not attempted. Instead: paint background-color
+		// (the mute color) and drop the portrait's own opacity so the tint shows
+		// through translucently. Distinct from Ring Color (which only paints the
+		// border) — this tints the whole node face.
+		{
+			selector: "node[muted = 'true'][mutedColor]",
+			style: {
+				"background-color": "data(mutedColor)",
+				"background-image-opacity": 0.55,
 			},
 		},
 		{

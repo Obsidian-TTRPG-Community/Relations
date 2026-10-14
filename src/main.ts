@@ -151,6 +151,20 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 		if (typeof this.settings.showNodeLabels !== "boolean") {
 			this.settings.showNodeLabels = DEFAULT_SETTINGS.showNodeLabels;
 		}
+		// statusRules: Node status rule table. Older settings won't have it;
+		// default to empty (feature inert until the user adds a rule). Also
+		// sanitize any row missing a field (e.g. from a pre-muteColor save).
+		if (!Array.isArray(this.settings.statusRules)) {
+			this.settings.statusRules = [];
+		} else {
+			this.settings.statusRules = this.settings.statusRules.map((r) => ({
+				property: typeof r.property === "string" ? r.property : "",
+				value: typeof r.value === "string" ? r.value : "",
+				hide: r.hide ?? false,
+				mute: r.mute ?? false,
+				muteColor: typeof r.muteColor === "string" && r.muteColor ? r.muteColor : "#6b7280",
+			}));
+		}
 	}
 
 	async saveSettings(): Promise<void> {
