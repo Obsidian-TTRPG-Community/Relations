@@ -76,6 +76,7 @@ export default class RelationsPlugin extends Plugin implements PositionStore, Ed
 					"# id: my-graph        # stable id; required to lock node positions in place\n" +
 					"# hide: parent, spouse  # relationship types to hide in this graph (the Filter button edits this)\n" +
 					"# groups: Social      # only show types in these groups (set Group in settings)\n" +
+					"# tags: ballroom      # only show notes with these tags in this graph\n" +
 					"# center: \"[[Other Note]]\"  # focus a different note\n" +
 					"```\n";
 				insertCodeBlock(editor, block);
