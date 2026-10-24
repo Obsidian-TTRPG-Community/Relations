@@ -131,6 +131,54 @@ export function filterGraphByGroups(
 }
 
 /**
+ * Keep only notes carrying at least one of `tags` (a code block's `tags:`
+ * option), plus the edges between them. Used for per-graph note filtering, e.g.
+ * "only the NPCs tagged #ballroom" without touching the global Required tags
+ * setting or any other graph.
+ *
+ * Tags match case-insensitively, with or without a leading `#`, and a tag also
+ * matches its nested tags (`ballroom` matches `#ballroom/guests`), the same way
+ * Obsidian's own tag search does. Missing notes have no tags, so they drop out.
+ * Nodes left with no edges are pruned like the other filters; `keepNodeId`
+ * (the center note) always stays.
+ *
+ * Pure: returns a new graph, so it's safe to apply to the cached full graph.
+ */
+export function filterGraphByTags(
+	graph: RelationsGraph,
+	tags: ReadonlySet<string>,
+	keepNodeId?: string,
+): RelationsGraph {
+	if (tags.size === 0) return graph;
+	const wanted = [...tags].map(normalizeTag).filter(Boolean);
+	if (wanted.length === 0) return graph;
+
+	const tagged = new Set<string>();
+	for (const n of graph.nodes) {
+		const own = n.tags.map(normalizeTag);
+		if (own.some((t) => wanted.some((w) => t === w || t.startsWith(w + "/")))) {
+			tagged.add(n.id);
+		}
+	}
+	if (keepNodeId) tagged.add(keepNodeId);
+
+	const edges = graph.edges.filter((e) => tagged.has(e.source) && tagged.has(e.target));
+	const connected = new Set<string>();
+	for (const e of edges) {
+		connected.add(e.source);
+		connected.add(e.target);
+	}
+	const nodes = graph.nodes.filter(
+		(n) => tagged.has(n.id) && (connected.has(n.id) || n.id === keepNodeId),
+	);
+	return withDisplayNames(graph, { nodes, edges });
+}
+
+function normalizeTag(t: string): string {
+	return t.trim().replace(/^#/, "").toLowerCase();
+}
+
+/**
  * Hide what the user asked to hide BEFORE a scoped view walks outward from
  * its center note: the global disabled-types filter (issue #28) and, for code
  * blocks, a `groups:` filter (issue #16). Walking first and filtering after
@@ -142,10 +190,14 @@ function filterBeforeWalk(
 	settings: RelationsSettings,
 	centerPath: string,
 	groups?: ReadonlySet<string>,
+	tags?: ReadonlySet<string>,
 ): RelationsGraph {
 	let g = filterGraphByTypes(full, new Set(settings.disabledTypes), centerPath);
 	if (groups && groups.size > 0) {
 		g = filterGraphByGroups(g, groups, centerPath, settings.relationshipTypes);
+	}
+	if (tags && tags.size > 0) {
+		g = filterGraphByTags(g, tags, centerPath);
 	}
 	return g;
 }
@@ -339,6 +391,7 @@ export function buildLocalGraph(
 	depth: number,
 	cache: GraphCache | null = null,
 	groups?: ReadonlySet<string>,
+	tags?: ReadonlySet<string>,
 ): RelationsGraph {
 	const full = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
@@ -351,7 +404,7 @@ export function buildLocalGraph(
 		return { nodes: [], edges: [] };
 	}
 
-	const filtered = filterBeforeWalk(full, settings, centerPath, groups);
+	const filtered = filterBeforeWalk(full, settings, centerPath, groups, tags);
 	return localSubgraph(filtered, centerPath, depth);
 }
 
@@ -483,6 +536,7 @@ export function buildConnectedGraph(
 	centerPath: string,
 	cache: GraphCache | null = null,
 	groups?: ReadonlySet<string>,
+	tags?: ReadonlySet<string>,
 ): RelationsGraph {
 	const full = buildFullGraph(app, settings, cache);
 	if (!full.nodes.some((n) => n.id === centerPath)) {
@@ -495,7 +549,7 @@ export function buildConnectedGraph(
 		}
 		return { nodes: [], edges: [] };
 	}
-	const filtered = filterBeforeWalk(full, settings, centerPath, groups);
+	const filtered = filterBeforeWalk(full, settings, centerPath, groups, tags);
 	return connectedComponent(filtered, centerPath);
 }
 
@@ -523,6 +577,7 @@ export function buildFamilyNeighborhood(
 	depth?: number,
 	cache: GraphCache | null = null,
 	groups?: ReadonlySet<string>,
+	tags?: ReadonlySet<string>,
 ): RelationsGraph {
 	const full = buildFullGraph(app, settings, cache);
 
@@ -535,7 +590,7 @@ export function buildFamilyNeighborhood(
 		return { nodes: [], edges: [] };
 	}
 
-	const filtered = filterBeforeWalk(full, settings, focusPath, groups);
+	const filtered = filterBeforeWalk(full, settings, focusPath, groups, tags);
 	return filterFamilyNeighborhood(filtered, focusPath, depth);
 }
 

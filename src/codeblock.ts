@@ -1,7 +1,7 @@
 import { App, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, parseYaml, setIcon, TFile } from "obsidian";
 import { Core } from "cytoscape";
 import { RelationsSettings, PositionStore, EdgeLabelStore, RelationshipType } from "./types";
-import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes, filterGraphByGroups, localSubgraph } from "./graph";
+import { buildFullGraph, buildLocalGraph, buildConnectedGraph, buildFamilyNeighborhood, filterGraphByTypes, filterGraphByGroups, filterGraphByTags, localSubgraph } from "./graph";
 import { renderGraph, synthesizeInformalPartnerships, INFORMAL_PARTNERSHIP_LEGEND } from "./render";
 import { renderFilterPanel } from "./filter-panel";
 import { replaceBlockBody, setHideInBody } from "./block-source";
@@ -29,6 +29,7 @@ interface CodeBlockOptions {
 	id?: string;
 	groups?: string[];  // strict filter by relationship type groups (OR logic); ungrouped types are excluded. e.g., ["Social", "Bonds"]
 	hide?: string[];    // relationship types hidden in THIS graph (issue #41). Written by the block's Filter panel.
+	tags?: string[];    // only notes with one of these tags appear in THIS graph (OR logic); the global Required tags setting still applies too.
 }
 
 const DEFAULTS: CodeBlockOptions = {
@@ -258,6 +259,13 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			? new Set(this.options.groups)
 			: undefined;
 
+		// Per-graph note filter (`tags:`): only notes carrying one of these tags.
+		// Applied before the walk too, so an untagged note can't act as a bridge
+		// that pulls tagged notes from elsewhere into a local/connected view.
+		const tags = this.options.tags && this.options.tags.length > 0
+			? new Set(this.options.tags)
+			: undefined;
+
 		// Both `full` and `connected` override family-mode's automatic
 		// neighbourhood narrowing — they're explicit user requests for
 		// "give me more than just the bloodline."
@@ -271,7 +279,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				return;
 			}
 			const familyDepth = this.options.depthExplicit ? effectiveDepth : undefined;
-			graph = buildFamilyNeighborhood(this.app, this.viewSettings(), hostFile.path, familyDepth, this.cache, groups);
+			graph = buildFamilyNeighborhood(this.app, this.viewSettings(), hostFile.path, familyDepth, this.cache, groups, tags);
 			highlightId = hostFile.path;
 		} else if (this.options.scope === "full") {
 			graph = buildFullGraph(this.app, this.settings, this.cache);
@@ -280,12 +288,13 @@ class RelationsBlockChild extends MarkdownRenderChild {
 			if (groups) {
 				graph = filterGraphByGroups(graph, groups, highlightId, this.settings.relationshipTypes);
 			}
+			if (tags) graph = filterGraphByTags(graph, tags, highlightId);
 		} else if (this.options.scope === "connected") {
 			if (!hostFile) {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for connected graph." });
 				return;
 			}
-			graph = buildConnectedGraph(this.app, this.viewSettings(), hostFile.path, this.cache, groups);
+			graph = buildConnectedGraph(this.app, this.viewSettings(), hostFile.path, this.cache, groups, tags);
 			// `connected` normally has no hop limit — it walks the whole
 			// component. But an explicitly written `depth:` shouldn't be
 			// silently ignored, and mini embeds always force a compact 1-hop
@@ -300,7 +309,7 @@ class RelationsBlockChild extends MarkdownRenderChild {
 				canvas.createDiv({ cls: "relations-empty", text: "Could not resolve host note for local graph." });
 				return;
 			}
-			graph = buildLocalGraph(this.app, this.viewSettings(), hostFile.path, effectiveDepth, this.cache, groups);
+			graph = buildLocalGraph(this.app, this.viewSettings(), hostFile.path, effectiveDepth, this.cache, groups, tags);
 			highlightId = hostFile.path;
 		}
 
@@ -313,7 +322,9 @@ class RelationsBlockChild extends MarkdownRenderChild {
 		if (graph.nodes.length === 0) {
 			canvas.createDiv({
 				cls: "relations-empty",
-				text: this.options.scope === "full"
+				text: tags
+					? "No related notes with these tags."
+					: this.options.scope === "full"
 					? "No connected notes found in vault."
 					: this.options.scope === "connected"
 						? "This note has no relationships."
@@ -552,6 +563,11 @@ export function resolveGroups(parsed: Record<string, unknown>): string[] | undef
 	return resolveList(parsed, "groups");
 }
 
+/** `tags:` — only notes carrying one of these tags appear in this graph. Same formats as groups:. */
+export function resolveTags(parsed: Record<string, unknown>): string[] | undefined {
+	return resolveList(parsed, "tags");
+}
+
 /** `hide:` — relationship types to hide in this graph (issue #41). Same formats as groups:. */
 export function resolveHide(parsed: Record<string, unknown>): string[] | undefined {
 	return resolveList(parsed, "hide");
@@ -661,8 +677,9 @@ export function parseOptions(source: string): ParsedOptions {
 
 	const groups = resolveGroups(parsed);
 	const hide = resolveHide(parsed);
+	const tags = resolveTags(parsed);
 
-	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, groups, hide, sizeExplicit, depthExplicit };
+	return { ...DEFAULTS, size, depth, scope, tree, familyMode, center, zoom, height, labels, spacing, id, groups, hide, tags, sizeExplicit, depthExplicit };
 }
 
 function resolveHostFile(app: App, hostPath: string, sourcePath: string): TFile | null {

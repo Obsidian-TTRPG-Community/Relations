@@ -130,6 +130,7 @@ The empty block uses sensible defaults — direct neighbours of the host note, m
 | `id`          | none                   | a stable identifier for this block. Required to **lock** the layout — see below |
 | `groups`      | none (show everything) | only show some kinds of relationships, e.g. `groups: Social` or `groups: "Social, Family"`. See [Show only some kinds of relationships](#show-only-some-kinds-of-relationships) |
 | `hide`        | none (show everything) | relationship types to hide in this graph, e.g. `hide: parent, spouse`. The graph's **Filter** button writes this line for you. See [Hide some relationships in one graph](#hide-some-relationships-in-one-graph) |
+| `tags`        | none (show everyone)   | only show notes with one of these tags in this graph, e.g. `tags: ballroom` or `tags: "ballroom, court"`. See [Show only some notes in one graph](#show-only-some-notes-in-one-graph) |
 
 
 ### Hide some relationships in one graph
@@ -167,6 +168,40 @@ The first one shows family, the second shows everyone else.
 - The side panel (the Relations view in the sidebar) has its own Filter, separate from the graphs in your notes.
 - If you have lots of types, [groups](#show-only-some-kinds-of-relationships) can be quicker: `groups: Family`.
 - Small graphs inside callouts have no Filter button (no room), but a typed `hide:` line still works.
+
+### Show only some notes in one graph
+
+`groups:` and `hide:` pick which **kinds of relationships** show. `tags:` picks which **notes** show. It's handy when the same characters turn up in more than one story, like everyone at a ball:
+
+1. Tag each guest's note, for example `#ballroom` (in the note or in its `tags` property).
+2. Make a graph that asks for that tag:
+
+````markdown
+```relations
+scope: full
+tags: ballroom
+```
+````
+
+Now the graph shows only the `#ballroom` notes and the relationships between them. Everyone else, and every line to someone else, is left out. The relationships themselves stay where they are, in each character's note.
+
+Mix it with `groups:` to narrow it further, e.g. only the guests' Social relationships:
+
+````markdown
+```relations
+scope: full
+tags: ballroom
+groups: Social
+```
+````
+
+**Good to know**
+
+- Want more than one tag? Use a comma: `tags: "ballroom, court"`. A note needs just one of them.
+- Big or small letters don't matter, and the `#` is optional. `tags: ballroom` also matches nested tags like `#ballroom/guests`.
+- With `scope: local` or `scope: connected`, the note the graph is centred on always shows, even if it doesn't have the tag. Untagged notes don't count as stepping stones, so a guest only connected through an untagged note won't be pulled in.
+- A tagged note with no relationship to any other tagged note isn't shown.
+- This only changes the one code block. The **Required tags** setting still applies to every graph.
 
 ### Show only some kinds of relationships
 
